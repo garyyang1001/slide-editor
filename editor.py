@@ -172,7 +172,9 @@ EDITOR_JS_TEMPLATE = r"""
       'body.__pin_mode__ ' + SLIDE_SELECTOR + ' *:hover{outline:1px solid var(--ed-red) !important;outline-offset:4px}',
 
       '#__editor_bar__{position:fixed;bottom:24px;right:24px;z-index:2147483647;background:var(--ed-bg-warm);color:var(--ed-ink);border:1px solid var(--ed-ink);font-family:var(--ed-font);font-weight:300;font-size:13px;line-height:1.5;min-width:480px;user-select:none}',
-      '.__bar_top{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--ed-line);font-size:11px;letter-spacing:0.1em;color:var(--ed-gray);text-transform:uppercase}',
+      '#__editor_bar__.__dragging{opacity:0.92}',
+      '.__bar_top{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--ed-line);font-size:11px;letter-spacing:0.1em;color:var(--ed-gray);text-transform:uppercase;cursor:move}',
+      '.__bar_top:hover{background:rgba(45,42,38,0.03)}',
       '.__bar_brand{color:var(--ed-ink);font-weight:500}',
       '.__bar_sep{color:var(--ed-line)}',
       '.__bar_hint{flex:1;text-transform:none;letter-spacing:0.025em;font-size:12px}',
@@ -317,6 +319,98 @@ EDITOR_JS_TEMPLATE = r"""
       if (level === 'dirty') status.classList.add('__dirty');
       else if (level === 'ok') status.classList.add('__ok');
     }
+
+    // ──────────────────────────────────────────────────────────
+    // TOOLBAR DRAG — let the user move the toolbar so it doesn't
+    // permanently cover the bottom-right of their slide.
+    // Position is persisted in localStorage. Double-click the
+    // top strip to reset to the default (bottom-right).
+    // ──────────────────────────────────────────────────────────
+    var dragHandle = bar.querySelector('.__bar_top');
+    var BAR_POS_KEY = '__slide_editor_bar_pos__';
+
+    function clampToViewport(x, y) {
+      var w = bar.offsetWidth;
+      var h = bar.offsetHeight;
+      var cx = Math.max(8, Math.min(window.innerWidth - w - 8, x));
+      var cy = Math.max(8, Math.min(window.innerHeight - h - 8, y));
+      return { x: cx, y: cy };
+    }
+
+    function applyBarPosition(x, y) {
+      var c = clampToViewport(x, y);
+      bar.style.left = c.x + 'px';
+      bar.style.top = c.y + 'px';
+      bar.style.right = 'auto';
+      bar.style.bottom = 'auto';
+    }
+
+    function resetBarPosition() {
+      bar.style.left = '';
+      bar.style.top = '';
+      bar.style.right = '24px';
+      bar.style.bottom = '24px';
+      try { localStorage.removeItem(BAR_POS_KEY); } catch (e) {}
+    }
+
+    // Restore saved position on load
+    try {
+      var saved = localStorage.getItem(BAR_POS_KEY);
+      if (saved) {
+        var pos = JSON.parse(saved);
+        if (typeof pos.x === 'number' && typeof pos.y === 'number') {
+          // Wait for layout to settle so offsetWidth/Height are correct
+          setTimeout(function () { applyBarPosition(pos.x, pos.y); }, 0);
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    var barDrag = null;
+    dragHandle.addEventListener('mousedown', function (e) {
+      // Skip clicks on the help button so it remains clickable
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      var rect = bar.getBoundingClientRect();
+      barDrag = {
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX: rect.left,
+        baseY: rect.top,
+      };
+      bar.classList.add('__dragging');
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!barDrag) return;
+      var newX = barDrag.baseX + (e.clientX - barDrag.startX);
+      var newY = barDrag.baseY + (e.clientY - barDrag.startY);
+      applyBarPosition(newX, newY);
+    });
+    document.addEventListener('mouseup', function () {
+      if (!barDrag) return;
+      bar.classList.remove('__dragging');
+      var rect = bar.getBoundingClientRect();
+      try {
+        localStorage.setItem(BAR_POS_KEY, JSON.stringify({ x: rect.left, y: rect.top }));
+      } catch (e) {}
+      barDrag = null;
+    });
+    dragHandle.addEventListener('dblclick', function (e) {
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      resetBarPosition();
+    });
+
+    // Re-clamp on window resize so the bar never escapes the viewport.
+    window.addEventListener('resize', function () {
+      var saved = null;
+      try {
+        var raw = localStorage.getItem(BAR_POS_KEY);
+        if (raw) saved = JSON.parse(raw);
+      } catch (e) {}
+      if (saved && typeof saved.x === 'number') {
+        applyBarPosition(saved.x, saved.y);
+      }
+    });
 
     // ──────────────────────────────────────────────────────────
     // SAVE
@@ -1298,6 +1392,11 @@ EDITOR_JS_TEMPLATE = r"""
       '      <tr><td><span class="__help_kbd">Esc</span></td><td>關閉對話框 ／ 退出標記模式 ／ 退出移動模式</td></tr>',
       '      <tr><td><span class="__help_kbd">?</span></td><td>開啟這份說明</td></tr>',
       '    </table>',
+      '  </div>',
+      '  <div class="__help_section">',
+      '    <h4>工具列位置</h4>',
+      '    <p>右下角擋到 slide？拖工具列頂端「編輯器 ／ ⋯」那條移到任何位置。位置會記住。</p>',
+      '    <p>不小心拖到看不見？雙擊頂端那條還原到右下角預設。</p>',
       '  </div>',
       '  <div class="__help_section">',
       '    <h4>注意事項</h4>',
