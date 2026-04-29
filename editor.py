@@ -26,7 +26,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 import urllib.parse
 from datetime import datetime
 
@@ -983,6 +985,170 @@ EDITOR_JS_TEMPLATE = r"""
 """
 
 
+# ────────────────────────────────────────────────────────────────────
+# AI BACKENDS
+# Two CLIs are supported for instant rewriting; both use OAuth (no key).
+#   claude  → Anthropic Claude Code CLI       (`claude -p`)
+#   codex   → OpenAI Codex CLI                (`codex exec`)
+# Each helper returns a normalized dict:
+#   {ok, new_html, cost_usd, duration_ms, backend, error?}
+# ────────────────────────────────────────────────────────────────────
+
+REWRITE_PROMPT_TEMPLATE = (
+    "You are rewriting one element from an HTML slide deck.\n\n"
+    "OUTPUT RULES (strict):\n"
+    "- Output ONLY the new inner HTML for the element. No explanation, no markdown fences, no quotes wrapping it, no preamble.\n"
+    "- Preserve inline tags <br>, <b>, <small>, <em>, <strong> where they make sense.\n"
+    "- Match the existing language, tone, and approximate length unless explicitly instructed otherwise.\n"
+    "- If instruction is ambiguous, use your best judgement. Do not ask questions.\n\n"
+    "Slide section label: %s\n"
+    "Element tag: <%s>\n"
+    "Current inner HTML:\n%s\n\n"
+    "User instruction: %s\n\n"
+    "Output the new inner HTML now:"
+)
+
+
+def build_rewrite_prompt(label, tag, current_html, user_prompt):
+    return REWRITE_PROMPT_TEMPLATE % (label, tag, current_html, user_prompt)
+
+
+def clean_ai_output(text):
+    """Strip code fences, wrapping quotes, leading/trailing whitespace."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    if (text.startswith('"') and text.endswith('"')) or (
+        text.startswith("'") and text.endswith("'")
+    ):
+        text = text[1:-1]
+    return text
+
+
+def call_claude(prompt, docroot, timeout=120):
+    """Call Anthropic Claude Code CLI with --output-format json."""
+    try:
+        proc = subprocess.run(
+            [
+                "claude",
+                "-p",
+                prompt,
+                "--output-format",
+                "json",
+                "--no-session-persistence",
+            ],
+            capture_output=True,
+            timeout=timeout,
+            text=True,
+            cwd=docroot,
+        )
+    except FileNotFoundError:
+        return {"ok": False, "backend": "claude", "error": "claude CLI not found in PATH"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "backend": "claude", "error": "claude timed out (%ds)" % timeout}
+
+    if proc.returncode != 0:
+        return {
+            "ok": False,
+            "backend": "claude",
+            "error": "claude exited %d: %s" % (proc.returncode, proc.stderr[:500]),
+        }
+    try:
+        data = json.loads(proc.stdout)
+    except Exception as e:
+        return {"ok": False, "backend": "claude", "error": "parse claude output: %s" % e}
+
+    return {
+        "ok": True,
+        "backend": "claude",
+        "new_html": clean_ai_output(data.get("result") or ""),
+        "cost_usd": data.get("total_cost_usd"),
+        "duration_ms": data.get("duration_ms"),
+    }
+
+
+def call_codex(prompt, docroot, timeout=180):
+    """Call OpenAI Codex CLI; result is written to a temp file via -o."""
+    fd, out_path = tempfile.mkstemp(suffix=".txt", prefix="slide-editor-codex-")
+    os.close(fd)
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            ["codex", "exec", "--skip-git-repo-check", "-o", out_path, prompt],
+            capture_output=True,
+            timeout=timeout,
+            text=True,
+            cwd=docroot,
+        )
+        elapsed_ms = int((time.time() - started) * 1000)
+
+        if proc.returncode != 0:
+            return {
+                "ok": False,
+                "backend": "codex",
+                "error": "codex exited %d: %s" % (proc.returncode, proc.stderr[:500]),
+            }
+
+        try:
+            with open(out_path, "r", encoding="utf-8") as f:
+                raw = f.read()
+        except OSError as e:
+            return {"ok": False, "backend": "codex", "error": "read codex output: %s" % e}
+
+        if not raw.strip():
+            tail = proc.stderr[-500:] if proc.stderr else ""
+            return {
+                "ok": False,
+                "backend": "codex",
+                "error": "codex returned empty output. stderr tail: %s" % tail,
+            }
+
+        return {
+            "ok": True,
+            "backend": "codex",
+            "new_html": clean_ai_output(raw),
+            "cost_usd": None,
+            "duration_ms": elapsed_ms,
+        }
+    except FileNotFoundError:
+        return {"ok": False, "backend": "codex", "error": "codex CLI not found in PATH"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "backend": "codex", "error": "codex timed out (%ds)" % timeout}
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+
+
+def resolve_backend(preferred):
+    """preferred ∈ {claude, codex, auto}.  Returns chosen backend name or None."""
+    if preferred == "claude":
+        return "claude" if shutil.which("claude") else None
+    if preferred == "codex":
+        return "codex" if shutil.which("codex") else None
+    if preferred == "auto":
+        if shutil.which("claude"):
+            return "claude"
+        if shutil.which("codex"):
+            return "codex"
+        return None
+    return None
+
+
+def call_ai(backend, prompt, docroot):
+    if backend == "claude":
+        return call_claude(prompt, docroot)
+    if backend == "codex":
+        return call_codex(prompt, docroot)
+    return {"ok": False, "backend": backend, "error": "unknown backend: %r" % backend}
+
+
 def make_handler(config):
     """Create a request handler bound to a config object."""
 
@@ -1106,77 +1272,35 @@ def make_handler(config):
                 if not user_prompt.strip():
                     self._send_json(400, {"ok": False, "error": "empty prompt"})
                     return
-                full_prompt = (
-                    "You are rewriting one element from an HTML slide deck.\n\n"
-                    "OUTPUT RULES (strict):\n"
-                    "- Output ONLY the new inner HTML for the element. No explanation, no markdown fences, no quotes wrapping it, no preamble.\n"
-                    "- Preserve inline tags <br>, <b>, <small>, <em>, <strong> where they make sense.\n"
-                    "- Match the existing language, tone, and approximate length unless explicitly instructed otherwise.\n"
-                    "- If instruction is ambiguous, use your best judgement. Do not ask questions.\n\n"
-                    "Slide section label: %s\n"
-                    "Element tag: <%s>\n"
-                    "Current inner HTML:\n%s\n\n"
-                    "User instruction: %s\n\n"
-                    "Output the new inner HTML now:"
-                ) % (label, tag, current_html, user_prompt)
 
-                try:
-                    proc = subprocess.run(
-                        [
-                            "claude",
-                            "-p",
-                            full_prompt,
-                            "--output-format",
-                            "json",
-                            "--no-session-persistence",
-                        ],
-                        capture_output=True,
-                        timeout=120,
-                        text=True,
-                        cwd=config.docroot,
-                    )
-                except FileNotFoundError:
-                    self._send_json(500, {"ok": False, "error": "claude CLI not found in PATH. Install Claude Code or run with --no-ai."})
-                    return
-                except subprocess.TimeoutExpired:
-                    self._send_json(500, {"ok": False, "error": "claude timed out (120s)"})
-                    return
-
-                if proc.returncode != 0:
+                backend = resolve_backend(config.backend)
+                if backend is None:
                     self._send_json(
                         500,
-                        {"ok": False, "error": "claude exited %d: %s" % (proc.returncode, proc.stderr[:500])},
+                        {
+                            "ok": False,
+                            "error": "neither claude nor codex CLI found in PATH. "
+                            "Install one (https://docs.claude.com/en/docs/claude-code "
+                            "or https://github.com/openai/codex), or run with --no-ai.",
+                        },
                     )
                     return
 
-                try:
-                    data = json.loads(proc.stdout)
-                    new_html = (data.get("result") or "").strip()
-                    cost = data.get("total_cost_usd")
-                    duration = data.get("duration_ms")
-                except Exception as e:
-                    self._send_json(500, {"ok": False, "error": "parse claude output: %s" % e})
-                    return
+                full_prompt = build_rewrite_prompt(label, tag, current_html, user_prompt)
+                result = call_ai(backend, full_prompt, config.docroot)
 
-                if new_html.startswith("```"):
-                    lines = new_html.split("\n")
-                    if lines and lines[0].startswith("```"):
-                        lines = lines[1:]
-                    if lines and lines[-1].startswith("```"):
-                        lines = lines[:-1]
-                    new_html = "\n".join(lines).strip()
-                if (new_html.startswith('"') and new_html.endswith('"')) or (
-                    new_html.startswith("'") and new_html.endswith("'")
-                ):
-                    new_html = new_html[1:-1]
+                if not result.get("ok"):
+                    self._send_json(500, {"ok": False, "error": result.get("error", "unknown error"), "backend": result.get("backend")})
+                    return
 
                 self._send_json(
                     200,
                     {
                         "ok": True,
-                        "new_html": new_html,
-                        "cost_usd": cost,
-                        "duration_ms": duration,
+                        "new_html": result.get("new_html", ""),
+                        "cost_usd": result.get("cost_usd"),
+                        "duration_ms": result.get("duration_ms"),
+                        "backend": result.get("backend"),
                     },
                 )
                 return
@@ -1271,6 +1395,12 @@ def main():
         action="store_true",
         help="disable instant AI rewriting (queueing still works)",
     )
+    parser.add_argument(
+        "--backend",
+        choices=["claude", "codex", "auto"],
+        default="auto",
+        help="AI backend for instant rewriting. 'auto' prefers claude, falls back to codex (default: auto)",
+    )
     args = parser.parse_args()
 
     deck_path = os.path.abspath(args.deck)
@@ -1292,6 +1422,7 @@ def main():
     config.slide_key = args.slide_key
     config.slide_selector = "%s.%s" % (args.slide_tag, args.slide_class)
     config.ai_enabled = not args.no_ai
+    config.backend = args.backend
     config.write_lock = threading.Lock()
     config.prompts_lock = threading.Lock()
 
@@ -1299,13 +1430,23 @@ def main():
     Handler = make_handler(config)
     httpd = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
     url = "http://%s:%d/%s" % (args.host, args.port, urllib.parse.quote(config.deck_file))
+
+    if config.ai_enabled:
+        chosen = resolve_backend(config.backend)
+        if chosen:
+            ai_state = "on (%s)" % chosen
+        else:
+            ai_state = "on (no backend found — install claude or codex CLI)"
+    else:
+        ai_state = "off"
+
     print("slide-editor running")
     print("  url:        %s" % url)
     print("  deck:       %s" % config.deck_path)
     print("  selector:   %s [%s]" % (config.slide_selector, config.slide_key))
     print("  backups:    %s" % config.backup_dir)
     print("  prompts:    %s" % config.prompts_file)
-    print("  ai-rewrite: %s" % ("on" if config.ai_enabled else "off"))
+    print("  ai-rewrite: %s" % ai_state)
     print("Press Ctrl+C to stop.")
     try:
         httpd.serve_forever()
