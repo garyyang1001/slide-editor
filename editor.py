@@ -1995,8 +1995,18 @@ def load_recent():
         return []
 
 
-def save_recent(deck_path, source):
+RECENT_CAP = 20
+
+
+def write_recent(items):
     RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(RECENT_FILE) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"projects": items}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, str(RECENT_FILE))
+
+
+def save_recent(deck_path, source):
     items = load_recent()
     deck_path = str(deck_path)
     items = [p for p in items if p.get("path") != deck_path]
@@ -2009,11 +2019,15 @@ def save_recent(deck_path, source):
             "loaded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         },
     )
-    items = items[:10]
-    tmp = str(RECENT_FILE) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"projects": items}, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, str(RECENT_FILE))
+    write_recent(items[:RECENT_CAP])
+
+
+def delete_recent(deck_path):
+    items = load_recent()
+    before = len(items)
+    items = [p for p in items if p.get("path") != deck_path]
+    write_recent(items)
+    return before - len(items)
 
 
 def switch_to_editor_mode(config, deck_path):
@@ -2075,13 +2089,18 @@ LAUNCHER_HTML = r"""<!doctype html>
   .path-form button:hover{opacity:0.85}
   .path-form button:disabled{opacity:0.4;cursor:wait}
   /* Recents list */
-  .recents{list-style:none;border-top:1px solid var(--line)}
-  .recents li{padding:18px 0;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:16px;cursor:pointer;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .recents-wrap{border-top:1px solid var(--line);max-height:480px;overflow-y:auto}
+  .recents{list-style:none}
+  .recents li{padding:0;border-bottom:1px solid var(--line);display:flex;align-items:stretch;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
   .recents li:hover{background:var(--bg-warm)}
-  .recents .name{font-size:18px;color:var(--ink);font-weight:400;flex:1;letter-spacing:0.02em}
-  .recents .meta{font-size:11px;color:var(--gray);font-family:var(--mono);letter-spacing:0.05em}
+  .recents li:last-child{border-bottom:0}
+  .recents .row-main{flex:1;display:flex;align-items:baseline;gap:16px;padding:18px 0;cursor:pointer;min-width:0}
+  .recents .name{font-size:18px;color:var(--ink);font-weight:400;flex:1;letter-spacing:0.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .recents .meta{font-size:11px;color:var(--gray);font-family:var(--mono);letter-spacing:0.05em;white-space:nowrap}
   .recents .source{font-size:11px;color:var(--red);letter-spacing:0.1em;text-transform:uppercase}
-  .recents .empty{padding:18px 0;color:var(--gray);font-style:italic;font-size:14px}
+  .recents .delete{padding:0 16px;margin-left:12px;background:transparent;border:0;color:var(--gray);cursor:pointer;font-size:18px;font-weight:300;font-family:var(--font);transition:color 280ms cubic-bezier(0.25,0.46,0.45,0.94);align-self:stretch}
+  .recents .delete:hover{color:var(--red)}
+  .recents .empty{padding:18px 0;color:var(--gray);font-style:italic;font-size:14px;border-bottom:0}
   /* Status */
   .status{margin-top:16px;font-size:13px;color:var(--gray);letter-spacing:0.05em;min-height:20px}
   .status.error{color:var(--red)}
@@ -2125,8 +2144,10 @@ LAUNCHER_HTML = r"""<!doctype html>
   </section>
 
   <section>
-    <h2>3　最近開過</h2>
-    <ul class="recents" id="recents"></ul>
+    <h2>3　最近開過　<span style="font-size:11px;color:var(--gray);font-weight:400;letter-spacing:0.05em;text-transform:none;margin-left:12px">最多 20 筆，可捲動</span></h2>
+    <div class="recents-wrap">
+      <ul class="recents" id="recents"></ul>
+    </div>
   </section>
 
   <div class="status" id="status"></div>
@@ -2216,15 +2237,35 @@ async function loadRecents() {
       recentsList.innerHTML = '<li class="empty">還沒有最近紀錄。從上面兩個方式載入第一個專案後會記錄這裡。</li>';
       return;
     }
-    recentsList.innerHTML = projects.map((p) =>
-      '<li data-path="' + p.path.replace(/"/g, '&quot;') + '">' +
-        '<span class="name">' + escapeHtml(p.name) + '</span>' +
-        '<span class="source">' + escapeHtml(p.source || 'path') + '</span>' +
-        '<span class="meta">' + new Date(p.loaded_at).toLocaleString() + '</span>' +
-      '</li>'
-    ).join('');
+    recentsList.innerHTML = projects.map((p) => {
+      const safePath = p.path.replace(/"/g, '&quot;');
+      return '<li data-path="' + safePath + '">' +
+        '<div class="row-main" data-action="load">' +
+          '<span class="name">' + escapeHtml(p.name) + '</span>' +
+          '<span class="source">' + escapeHtml(p.source || 'path') + '</span>' +
+          '<span class="meta">' + new Date(p.loaded_at).toLocaleString() + '</span>' +
+        '</div>' +
+        '<button class="delete" data-action="delete" title="刪除這筆紀錄（不會刪除實際檔案）">×</button>' +
+      '</li>';
+    }).join('');
     recentsList.querySelectorAll('li[data-path]').forEach((li) => {
-      li.addEventListener('click', () => loadDeckByPath(li.dataset.path));
+      const path = li.dataset.path;
+      const main = li.querySelector('[data-action="load"]');
+      const del = li.querySelector('[data-action="delete"]');
+      if (main) main.addEventListener('click', () => loadDeckByPath(path));
+      if (del) del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await fetch('/api/recent/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+          });
+          loadRecents();
+        } catch (err) {
+          setStatus('刪除失敗：' + err, 'error');
+        }
+      });
     });
   } catch (e) {
     recentsList.innerHTML = '<li class="empty">無法載入最近紀錄</li>';
@@ -2666,6 +2707,20 @@ def make_handler(config):
                     200,
                     {"ok": True, "redirect": "/" + urllib.parse.quote(config.deck_file)},
                 )
+                return
+
+            if self.path == "/api/recent/delete":
+                try:
+                    payload = self._read_json()
+                    target = payload.get("path", "").strip()
+                except Exception as e:
+                    self._send_json(400, {"ok": False, "error": "bad payload: %s" % e})
+                    return
+                if not target:
+                    self._send_json(400, {"ok": False, "error": "missing path"})
+                    return
+                removed = delete_recent(target)
+                self._send_json(200, {"ok": True, "removed": removed})
                 return
 
             if self.path == "/launch/reset":
