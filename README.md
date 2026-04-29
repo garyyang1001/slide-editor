@@ -10,11 +10,13 @@ python3 editor.py path/to/deck.html
 
 ## 介紹影片
 
-40 秒介紹影片（用 [Remotion](https://www.remotion.dev/) 寫的，原始碼在 [`video/`](video/)）。內容含三段功能實機演示：游標移動、hover 提示、文字打字、圖片拖放、四角縮放、AI 改寫 modal、改前改後對照、套用：
+40 秒介紹影片，三段功能實機演示：游標移動、hover 提示、文字打字、圖片拖放、四角縮放、AI 改寫 modal、改前改後對照、套用。
 
-[![slide-editor 介紹影片](assets/intro-poster.png)](assets/intro.mp4)
+[![slide-editor 介紹影片](assets/thumbnail.png)](https://www.youtube.com/watch?v=XzqKnguk63k)
 
-[▶ 點圖播放 ／ 直接下載 MP4](assets/intro.mp4)
+▶ **[YouTube 上看完整影片](https://www.youtube.com/watch?v=XzqKnguk63k)**
+
+> 影片用 [Remotion](https://www.remotion.dev/) 寫的，原始碼在 [`video/`](video/)，`cd video && npm install && npm run render` 一行可重出。
 
 ---
 
