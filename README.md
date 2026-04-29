@@ -1,10 +1,18 @@
-# slide-editor
+# Claude Slide Editor
 
-瀏覽器內的 HTML 簡報編輯器。**點任何文字直接改、拖元件、調字級、選一段話讓 AI 改寫**。改完直接寫回原檔，自動備份。
+> repo / 套件名：`slide-editor`　·　產品名（首頁顯示）：**Claude Slide Editor**
 
-單一 Python 檔，零外部相依，無建置步驟。為了「**Claude Design 出第一版、本機編輯器接手後續迭代**」這個工作流而做。
+瀏覽器內的 HTML 簡報編輯器。**點文字直接編輯、新增標題／段落、改字體字重、貼上圖片、AI 一鍵改寫某段、右鍵刪除元件、拖元件、自動備份**。改完寫回原檔。
 
-```
+單一 Python 檔，零外部相依，無建置步驟。為「**Claude Design 出第一版，本機編輯器接手後續迭代**」這個工作流而做。
+
+兩種啟動方式：
+
+```bash
+# A) 啟動首頁（拖 Claude Design zip 進來、或貼路徑、或從最近開過清單）
+python3 editor.py
+
+# B) 直接編輯指定 deck
 python3 editor.py path/to/deck.html
 ```
 
@@ -12,7 +20,7 @@ python3 editor.py path/to/deck.html
 
 40 秒介紹影片，三段功能實機演示：游標移動、hover 提示、文字打字、圖片拖放、四角縮放、AI 改寫 modal、改前改後對照、套用。
 
-[![slide-editor 介紹影片](assets/thumbnail.png)](https://www.youtube.com/watch?v=XzqKnguk63k)
+[![Claude Slide Editor 介紹影片](assets/thumbnail.png)](https://www.youtube.com/watch?v=XzqKnguk63k)
 
 ▶ **[YouTube 上看完整影片](https://www.youtube.com/watch?v=XzqKnguk63k)**
 
@@ -37,7 +45,7 @@ python3 editor.py path/to/deck.html
                                                                      自動備份
 ```
 
-第一版交給 Claude Design 處理（它擅長從零生整份 deck）。後續所有調整 ── 改文案、搬卡片、改字級、要 AI 重寫某一段 ── 全部在本機 `slide-editor` 裡完成。手動編輯完全免費，AI 改寫每次只送一個元素 + 一個指令進 LLM，token 用量是 Claude Design 重生整份的零頭。
+第一版交給 Claude Design 處理（它擅長從零生整份 deck）。後續所有調整 ── 改文案、搬卡片、改字級、要 AI 重寫某一段、新增 / 刪除元件 ── 全部在本機 `slide-editor` 裡完成。手動編輯完全免費，AI 改寫每次只送一個元素 + 一個指令進 LLM，token 用量是 Claude Design 重生整份的零頭。
 
 ---
 
@@ -45,14 +53,20 @@ python3 editor.py path/to/deck.html
 
 | | |
 |---|---|
-| **直接編輯** | 滑到任何文字會出現淡灰細線 → 點下去 → 直接打字。 |
-| **移動元件** | 開「移動模式」→ 拖任何元件 → 位置存成 `transform: translate(x,y)` 寫進 inline style。雙擊可還原。 |
-| **改字級** | 點任何文字 → 上方浮出小工具列：`−` 縮小 / 目前大小 / `+` 放大 / `RESET` 還原。或鍵盤 `Alt+↑` / `Alt+↓`。 |
-| **AI 改寫（即時）** | 標記某段文字 → 輸入指令（「改更口語」「縮成兩句」）→ 10–18 秒後跳出「改前 ／ 改後」對照 → 接受或丟棄。 |
-| **AI 改寫（佇列）** | 同樣標記但選「加入佇列」→ 累積一批 prompt → 回 Claude Code 對話框說「跑 queue」一次處理。 |
-| **插入圖片** | 拖檔進瀏覽器 → 落在拖放點。或工具列「新增圖片」→ 選檔 → 自動放在當前看的那張 slide 中央。 |
-| **縮放圖片** | 點圖片 → 四個角出現方塊 handle → 拖角縮放（鎖定長寬比）。`Backspace` 刪除選中的圖片。 |
-| **存檔** | `⌘S` 寫回原始 HTML。每次存檔前自動備份到 `.backups/`，保留 20 份。 |
+| **直接編輯文字** | 滑到任何文字 → 淡灰細線提示 → 點下去 → 打字。所有 slide 內可編輯文字自動偵測。 |
+| **新增元件** | 工具列「＋ 標題」/「＋ 文字」→ 游標準心 → 點 slide 位置放，placeholder 文字全選，直接打字取代。 |
+| **粗 / 斜 / 底** | 字體工具列 `B` / `I` / `U`，或鍵盤 `⌘B` / `⌘I` / `⌘U`。 |
+| **改字體** | 13 款 Google Fonts：Noto Sans/Serif TC、Inter、Plus Jakarta、IBM Plex、Manrope、Crimson Pro、Lora、JetBrains Mono…，動態載入。 |
+| **改字重 / 字級** | 字體工具列下拉 300/400/500/700 + 加減按鈕（或 `Alt+↑` / `Alt+↓`）。 |
+| **移動元件** | 移動模式 → 拖元件 → 位置存成 `transform: translate(x,y)`。雙擊還原。 |
+| **插入圖片** | 拖檔進瀏覽器 → 落在拖放點。或工具列「新增圖片」→ 自動放當前 slide 中央。 |
+| **縮放圖片** | 點圖片 → 四角 handle → 拖角縮放，鎖定長寬比。 |
+| **AI 改寫（即時）** | 標記某段 → 輸入指令 → 10–18 秒後跳「改前 / 改後」對照 → 接受或丟棄。 |
+| **AI 改寫（佇列）** | 標記後選「加入佇列」→ 累積一批 → 回 Claude Code 對話框說「跑 queue」批次處理。 |
+| **右鍵刪除元件** | 右鍵任何元素 → 紙底選單 → 刪這個 / 刪外層容器。 |
+| **拖移工具列** | 工具列頂端「編輯器 ／ ⋯」可拖到任何位置，記憶在 localStorage，雙擊還原。 |
+| **返回首頁** | 工具列「← 首頁」回啟動頁換別份簡報。未存會三選一守門：先存再返回 / 丟棄返回 / 取消。 |
+| **存檔** | `⌘S` 寫回原始 HTML。每次存前自動備份到 `.backups/`，保留 20 份。 |
 
 編輯器 JS 是 server 注入的，原始 HTML 檔在你按存檔之前**完全不會被動到**。
 
@@ -65,10 +79,12 @@ python3 editor.py path/to/deck.html
 ```bash
 git clone https://github.com/garyyang1001/slide-editor.git
 cd slide-editor
-python3 editor.py examples/demo.html
+python3 editor.py             # 啟動首頁
+# 或
+python3 editor.py examples/demo.html   # 直接編輯指定 deck
 ```
 
-開瀏覽器到終端機印的網址（預設 `http://127.0.0.1:8765/demo.html`）。
+開瀏覽器到終端機印的網址（預設 `http://127.0.0.1:8765/`）。
 
 如果想用「即時 AI 改寫」（按下「立即重寫」會 10–18 秒後跳對照），需要至少裝**其中一個** AI CLI：
 
@@ -86,9 +102,9 @@ python3 editor.py examples/demo.html
 ## 使用方式
 
 ```
-python3 editor.py DECK [options]
+python3 editor.py [DECK] [options]
 
-DECK                  HTML 簡報檔的路徑（必填）
+DECK                  HTML 簡報檔的路徑（可省略 → 啟動首頁）
 
 --port PORT           HTTP port（預設：8765）
 --host HOST           綁定地址（預設：127.0.0.1）
@@ -99,6 +115,16 @@ DECK                  HTML 簡報檔的路徑（必填）
 --slide-class CLASS   slide 的 CSS class（預設：slide）
 --slide-key ATTR      slide 的唯一鍵屬性（預設：data-label）
 ```
+
+### 啟動首頁
+
+不傳 `DECK` 跑 `python3 editor.py`，server 會啟動成 launcher 模式，瀏覽器到 `http://127.0.0.1:8765/` 看到一張紙感封面，三種載入方式：
+
+1. **拖 zip**　Claude Design 匯出的 zip 拖進去 → 自動解壓到 `~/.slide-editor/projects/<name>-<時間戳>/` → 找到 `.html` → 切換成 editor 模式 → 跳轉
+2. **貼路徑**　絕對路徑到本機 `.html` → 驗證 → 載入
+3. **最近開過**　顯示最近 10 個專案，點一下重開
+
+未來想換別份簡報：editor 工具列「← 首頁」回到啟動頁。
 
 ### 你的 deck 結構長什麼樣
 
@@ -131,7 +157,31 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 `⌘S` 存檔。
 
-### 二　移動元件
+### 二　新增元件
+
+工具列「**＋ 標題**」（h2）或「**＋ 文字**」（p）→ 游標變準心，slide hover 邊框變紅 → **點任何 slide 任何位置** → 元件落地 + 自動 focus + placeholder 文字全選 → 直接打字取代。
+
+新元件用 `position: absolute` + 點擊位置作 left/top，所以不會破壞原本 layout。可以用後續所有功能編輯（字體、字重、粗斜底、移動、刪除）。
+
+### 三　改字體 ／ 字重 ／ 字級 ／ 粗斜底
+
+點任何文字 → 元素上方浮出小工具列：
+
+```
+[ 字體 ▾ ]  [ 字重 ▾ ]  [ B ]  [ I ]  [ U ]  [ − ]  [ 16px ]  [ + ]  [ RESET ]
+```
+
+| 控制 | 動作 |
+|---|---|
+| **字體下拉** | 13 款 Google Fonts。Noto Sans/Serif TC、Inter、Plus Jakarta Sans、IBM Plex Sans、Manrope、Space Grotesk、DM Sans、Crimson Pro、Lora、Playfair Display、JetBrains Mono、IBM Plex Mono。**選了動態載入**，沒選不會先載入。 |
+| **字重下拉** | 300 / 400 / 500 / 700 |
+| **B ／ I ／ U** | 粗體 / 斜體 / 底線。先選一段文字再點，或鍵盤 `⌘B` / `⌘I` / `⌘U`。 |
+| **− ／ +** | 字級減／加 2px（也可 `Alt+↑` / `Alt+↓`） |
+| **RESET** | 還原所有 font 設定（family、weight、size 一起清掉） |
+
+所有改動寫進元素的 inline style，跟著 `⌘S` 一起存檔。
+
+### 四　移動元件
 
 點工具列「**移動模式**」（會變紅、游標變抓手）。拖任何元件。
 
@@ -141,17 +191,29 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 雙擊任何元件：清掉它的 transform，回到原位。
 
-### 三　改字級
+### 五　插入與縮放圖片
 
-點任何文字（focus 進去）。上方會浮出小工具列，四顆按鈕：
+兩種上傳路徑，看你要不要當下指定位置：
 
-```
-[ − ]  [ 18px ]  [ + ]  [ RESET ]
-```
+- **拖檔**　把圖片從 Finder 拖進瀏覽器，落在哪張 slide 圖就放哪裡。**用這個指定確切位置**。
+- **按鈕**　工具列「**新增圖片**」→ 選檔 → 圖片自動放到**當前看的那張 slide 中央**，並自動選中（馬上看到縮放 handle）。
 
-或鍵盤 `Alt+↑` / `Alt+↓` 一次 2px。大小寫進元素的 inline `font-size`，跟 ⌘S 一起存。
+按鈕流程的「當前 slide」偵測有四層保險：
 
-### 四　AI 改寫
+1. `[data-deck-active]` 屬性（`<deck-stage>` 跟類似系統會標）
+2. 當前唯一可見的 slide（檢查 `display` / `opacity` / `visibility` / 渲染矩形）
+3. 視窗中央最接近的 slide（給捲動式 deck 用）
+4. 第一張（最後保險）
+
+圖片儲存到 deck 旁的 `images/` 資料夾，HTML 用相對路徑引用。**支援格式**：jpg / png / webp / gif / svg，**單檔上限** 10 MB。
+
+插入後：
+
+- **移動**　開移動模式拖曳，跟其他元件一樣。
+- **縮放**　點圖片 → 四個角出現方塊 handle → 拖角縮放，鎖定長寬比。
+- **刪除**　選中圖片按 `Backspace` 或 `Delete`。
+
+### 六　AI 改寫某段
 
 點工具列「**標記 prompt**」（會變紅、游標變準心）。在 slide 上點你要改寫的元素 → 跳出對話框：
 
@@ -176,33 +238,37 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 待處理的 prompt 會在元素旁顯示紅色小方塊計數，可以隨時點開看／刪。
 
-### 五　插入與縮放圖片
+### 七　刪除元件
 
-兩種上傳路徑，看你要不要當下指定位置：
+**右鍵任何元素** → 跳出紙底選單，紅框框出當前要刪的目標：
 
-- **拖檔**　把圖片從 Finder 拖進瀏覽器，落在哪張 slide 圖就放哪裡（拖過 slide 時會出現紅色虛線提示）。**用這個指定確切位置**。
-- **按鈕**　工具列「**新增圖片**」→ 選檔 → 圖片自動放到**當前看的那張 slide 中央**，並自動選中（馬上看到縮放 handle）。**不用切換頁面、不用第二次點擊**。
+| 選項 | 動作 |
+|---|---|
+| **刪除這個元素** | 只刪你右鍵點到的 |
+| **刪除外層容器** | 刪整個包住它的 div / 卡片 / section（如果有） |
+| **取消** | 關閉選單什麼都不做 |
 
-按鈕流程的「當前 slide」偵測有四層保險：
+不小心刪錯：去 `.backups/` 找上次的 HTML 還原。
 
-1. `[data-deck-active]` 屬性（`<deck-stage>` 跟類似系統會標）
-2. 當前唯一可見的 slide（檢查 `display` / `opacity` / `visibility` / 渲染矩形）
-3. 視窗中央最接近的 slide（給捲動式 deck 用）
-4. 第一張（最後保險）
+### 八　工具列位置
 
-圖片儲存到 deck 旁的 `images/` 資料夾，HTML 用相對路徑引用（`<img src="images/..." />`）。檔名加毫秒時間戳避免衝突。**支援格式**：jpg / png / webp / gif / svg，**單檔上限** 10 MB。
+右下角預設位置擋到 slide？拖工具列頂端「**編輯器 ／ ⋯**」那條可以把整個工具列移到任何地方。位置會記在 localStorage，重新整理還在那。
 
-插入後：
+不小心拖到看不見？**雙擊頂端那條**還原到右下角預設。
 
-- **移動**　開移動模式拖曳，跟其他元件一樣（`transform: translate` 加在 inline style）。
-- **縮放**　點圖片 → 四個角出現方塊 handle → 拖角縮放，鎖定長寬比。
-- **刪除**　選中圖片按 `Backspace` 或 `Delete`。
-
-### 存檔
+### 存檔 + 自動備份
 
 `⌘S` 或工具列「**存檔**」。Server 找到對應 slide 的區塊（用你的 `--slide-key`），把 inner HTML 換掉、寫回檔案。沒動過的 slide 不會被重寫。
 
 每次存檔前自動備份到 `.backups/deck-YYYYMMDD-HHMMSS.html`，保留最近 20 份。
+
+### 返回首頁
+
+工具列「**← 首頁**」回到啟動頁，可以換別份簡報來編。如果你還有未存檔的變動，會跳對話框三選一：
+
+- **取消** ── 留下繼續編
+- **丟棄變動返回** ── 直接走，當前變動不寫回檔
+- **先存檔再返回** ── 先存所有變動再回首頁
 
 ---
 
@@ -211,26 +277,29 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 | 按鍵 | 動作 |
 |---|---|
 | `⌘S` / `Ctrl+S` | 儲存所有變動 |
+| `⌘B` / `⌘I` / `⌘U` | 粗體 / 斜體 / 底線 |
 | `⌘+Enter` | 對話框內，送出 prompt 加入佇列 |
 | `Alt+↑` / `Alt+↓` | 放大／縮小目前選取的文字 2px |
-| `雙擊` | 移動模式下，將該元件還原到原位 |
+| `右鍵` | 開啟刪除元素選單 |
+| `雙擊` | 移動模式下還原元件位置　／　工具列頂端還原工具列位置 |
 | `Backspace` / `Delete` | 刪除目前選取的圖片 |
 | 拖檔到 slide | 上傳並插入圖片到拖放位置 |
-| `Esc` | 關閉對話框 ／ 退出標記模式 ／ 退出移動模式 |
+| `Esc` | 關閉對話框 ／ 退出標記 / 移動 / 插入元件 / 放置圖片模式 |
 | `?` | 開啟使用說明 overlay |
 
 ---
 
 ## 架構
 
-`editor.py` 是一支約 1900 行的 Python 腳本，包了標準庫的 `http.server`。做四件事：
+`editor.py` 是一支約 3000 行的 Python 腳本，包了標準庫的 `http.server`。做五件事：
 
 1. **服務 deck 檔**　收到 GET 請求時把編輯器 JS bundle（toolbar、modal、所有事件處理）注入到 `</body>` 前面才回傳。原始檔不動。
 2. **存 slide 級的編輯**　`POST /save-slide`：讀原檔、regex 找對應 slide、換 inner HTML、寫回。寫之前自動備份到 `.backups/`。
 3. **管 prompt + 跑 AI**　`/queue-prompt`、`/delete-prompt`、`/clear-prompts`、`/list-prompts` 操作 `prompts.json`。`/ai-edit` shells out 到 `claude` 或 `codex` CLI 做即時改寫，依 `--backend` 旗標選擇。
 4. **處理圖片上傳**　`POST /upload-image` 自帶 multipart 解析器（不依賴已被 deprecate 的 `cgi` module），驗證副檔名、MIME、大小、檔名 sanitize、`realpath` 防穿越，存到 `<docroot>/images/`。
+5. **Launcher 模式**　不傳 deck arg 時，server 啟動成 launcher。`POST /launch/zip` 解壓到 `~/.slide-editor/projects/`、`POST /launch/path` 驗證路徑、`POST /launch/reset` 切回 launcher 模式。`~/.slide-editor/recent.json` 記最近 10 筆。
 
-注入的 JS 是 Python 檔裡的字串模板。沒有 build step、沒有 npm、沒有外部 Python 套件。`python3 editor.py deck.html` 一行就跑。
+注入的 JS 是 Python 檔裡的字串模板。沒有 build step、沒有 npm、沒有外部 Python 套件。`python3 editor.py` 一行就跑。
 
 ---
 
@@ -273,6 +342,8 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 這個工具是顧問工作流程的副產品。我們做提案、教育訓練、客戶簡報，每個禮拜都在打磨一份份 HTML deck。Claude Design 出第一版很快，但每改一段話都要重灌整份 deck 進 context，token 燒得心痛。所以我們做了 `slide-editor` ── **第一版交給 Claude Design，後續迭代在本機跑，每次 AI 改寫只送一個元素**，成本是原本的零頭。
 
 我們相信「不追求炫技，只專注於解決問題的本質」。如果你也在用 Claude / Codex 做內容工作，這個工具是現成的、開源的、隨便你改。
+
+> **好事發生數位出品，版權沒有，歡迎隨意取用。**
 
 ### 聯絡
 
