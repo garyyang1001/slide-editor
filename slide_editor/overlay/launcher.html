@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claude Slide Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#2D2A26; --bg:#F5F5F0; --gray:#8C8C88; --line:#E0E0D8;
+    --red:#C84630; --bg-warm:#FAFAF5;
+    --font:"Noto Sans TC","PingFang TC","Heiti TC",-apple-system,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--font);font-weight:300;-webkit-font-smoothing:antialiased;line-height:1.6}
+  body{padding:64px 32px;display:flex;justify-content:center}
+  main{max-width:920px;width:100%}
+  /* Cover */
+  .cover{padding:48px 0 64px;border-bottom:1px solid var(--line);margin-bottom:64px}
+  .brand{font-size:13px;letter-spacing:0.18em;color:var(--gray);text-transform:uppercase;margin-bottom:32px}
+  h1{font-size:96px;font-weight:300;letter-spacing:0.02em;line-height:1;margin-bottom:24px}
+  .tagline{font-size:24px;color:var(--ink);font-weight:300;letter-spacing:0.02em;max-width:680px}
+  .rule-ink{border:0;border-top:1px solid var(--ink);width:160px;margin:24px 0}
+  /* Sections */
+  section{margin-bottom:56px}
+  section h2{font-size:14px;font-weight:500;letter-spacing:0.18em;color:var(--gray);text-transform:uppercase;margin-bottom:24px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  section .lead{font-size:14px;color:var(--gray);margin-bottom:16px;line-height:1.7}
+  /* Drop zone */
+  .drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1px dashed var(--ink);background:var(--bg-warm);padding:64px 32px;text-align:center;cursor:pointer;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94);min-height:160px}
+  .drop:hover,.drop.over{background:var(--ink);color:var(--bg)}
+  .drop:hover .drop-hint,.drop.over .drop-hint{color:var(--bg)}
+  .drop strong{font-size:20px;font-weight:500;letter-spacing:0.02em}
+  .drop-hint{font-size:13px;color:var(--gray);transition:color 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .drop input[type=file]{display:none}
+  /* Path form */
+  .path-form{display:flex;gap:12px;align-items:stretch}
+  .path-form input[type=text]{flex:1;border:1px solid var(--line);background:var(--bg-warm);padding:14px 18px;font:300 15px/1.5 var(--mono);color:var(--ink);min-width:0}
+  .path-form input[type=text]:focus{outline:0;border-color:var(--ink)}
+  .path-form button{border:1px solid var(--ink);background:var(--ink);color:var(--bg);padding:0 28px;font:400 13px/1 var(--font);letter-spacing:0.1em;cursor:pointer;transition:opacity 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .path-form button:hover{opacity:0.85}
+  .path-form button:disabled{opacity:0.4;cursor:wait}
+  /* Recents list */
+  .recents-wrap{border-top:1px solid var(--line);max-height:480px;overflow-y:auto}
+  .recents{list-style:none}
+  .recents li{padding:0;border-bottom:1px solid var(--line);display:flex;align-items:stretch;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .recents li:hover{background:var(--bg-warm)}
+  .recents li:last-child{border-bottom:0}
+  .recents .row-main{flex:1;display:flex;align-items:baseline;gap:16px;padding:18px 0;cursor:pointer;min-width:0}
+  .recents .name{font-size:18px;color:var(--ink);font-weight:400;flex:1;letter-spacing:0.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .recents .meta{font-size:11px;color:var(--gray);font-family:var(--mono);letter-spacing:0.05em;white-space:nowrap}
+  .recents .source{font-size:11px;color:var(--red);letter-spacing:0.1em;text-transform:uppercase}
+  .recents .delete{padding:0 16px;margin-left:12px;background:transparent;border:0;color:var(--gray);cursor:pointer;font-size:18px;font-weight:300;font-family:var(--font);transition:color 280ms cubic-bezier(0.25,0.46,0.45,0.94);align-self:stretch}
+  .recents .delete:hover{color:var(--red)}
+  .recents .empty{padding:18px 0;color:var(--gray);font-style:italic;font-size:14px;border-bottom:0}
+  /* Status */
+  .status{margin-top:16px;font-size:13px;color:var(--gray);letter-spacing:0.05em;min-height:20px}
+  .status.error{color:var(--red)}
+  .status.ok{color:var(--ink)}
+  .loading-bar{display:none;height:1px;background:var(--line);position:relative;overflow:hidden;margin-top:8px}
+  .loading-bar.show{display:block}
+  .loading-bar::after{content:"";position:absolute;top:0;left:-30%;width:30%;height:100%;background:var(--ink);animation:sweep 1400ms cubic-bezier(0.25,0.46,0.45,0.94) infinite}
+  @keyframes sweep{0%{left:-30%}100%{left:100%}}
+  /* Footer */
+  footer{margin-top:96px;padding-top:32px;border-top:1px solid var(--line);font-size:12px;color:var(--gray);letter-spacing:0.05em;display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px}
+  footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink)}
+  footer a:hover{opacity:0.7}
+</style>
+</head>
+<body>
+<main>
+  <div class="cover">
+    <div class="brand">好事發生數位　·　OHYA DIGITAL</div>
+    <h1>Claude Slide Editor</h1>
+    <hr class="rule-ink">
+    <p class="tagline">好事發生數位出品，版權沒有，歡迎隨意取用。</p>
+  </div>
+
+  <section>
+    <h2>1　拖 zip 進來</h2>
+    <p class="lead">把從 Claude Design 匯出的 zip 拖進下面區塊，或點擊選檔。系統會自動解壓到 ~/.slide-editor/projects/，找到 .html 並開啟編輯器。</p>
+    <label class="drop" id="drop">
+      <strong>拖放 zip 檔到這裡</strong>
+      <span class="drop-hint">或點擊選檔　·　支援 Claude Design 標準匯出</span>
+      <input type="file" id="zip-input" accept=".zip,application/zip">
+    </label>
+  </section>
+
+  <section>
+    <h2>2　或指定本機 deck 路徑</h2>
+    <p class="lead">已經解壓過、或從別的地方拿到的 .html 檔，直接給絕對路徑。</p>
+    <form class="path-form" id="path-form">
+      <input type="text" id="path-input" placeholder="/Users/.../deck.html" autocomplete="off" spellcheck="false">
+      <button type="submit">載入</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>3　最近開過　<span style="font-size:11px;color:var(--gray);font-weight:400;letter-spacing:0.05em;text-transform:none;margin-left:12px">最多 20 筆，可捲動</span></h2>
+    <div class="recents-wrap">
+      <ul class="recents" id="recents"></ul>
+    </div>
+  </section>
+
+  <div class="status" id="status"></div>
+  <div class="loading-bar" id="loading"></div>
+
+  <footer>
+    <span>好事發生數位　·　Gary　·　台中</span>
+    <span>
+      <a href="https://github.com/garyyang1001/slide-editor" target="_blank">GitHub</a>　·
+      <a href="https://ohya.co" target="_blank">ohya.co</a>
+    </span>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const drop = $('drop');
+const zipInput = $('zip-input');
+const pathForm = $('path-form');
+const pathInput = $('path-input');
+const recentsList = $('recents');
+const status = $('status');
+const loading = $('loading');
+
+function setStatus(text, level) {
+  status.textContent = text;
+  status.className = 'status' + (level ? ' ' + level : '');
+}
+function showLoading(yes) { loading.classList.toggle('show', yes); }
+
+async function loadDeckByZip(file) {
+  if (!file) return;
+  if (!/\.zip$/i.test(file.name)) {
+    setStatus('需要 .zip 檔', 'error');
+    return;
+  }
+  setStatus('上傳並解壓中…');
+  showLoading(true);
+  const fd = new FormData();
+  fd.append('zip', file);
+  try {
+    const r = await fetch('/launch/zip', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!data.ok) {
+      setStatus('失敗：' + (data.error || '未知'), 'error');
+      return;
+    }
+    setStatus('完成，跳轉中…', 'ok');
+    setTimeout(() => { window.location.href = data.redirect; }, 200);
+  } catch (e) {
+    setStatus('失敗：' + e, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function loadDeckByPath(path) {
+  if (!path) return;
+  setStatus('檢查路徑…');
+  showLoading(true);
+  try {
+    const r = await fetch('/launch/path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      setStatus('失敗：' + (data.error || '未知'), 'error');
+      return;
+    }
+    setStatus('完成，跳轉中…', 'ok');
+    setTimeout(() => { window.location.href = data.redirect; }, 200);
+  } catch (e) {
+    setStatus('失敗：' + e, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function loadRecents() {
+  try {
+    const r = await fetch('/api/recent');
+    const data = await r.json();
+    const projects = data.projects || [];
+    if (!projects.length) {
+      recentsList.innerHTML = '<li class="empty">還沒有最近紀錄。從上面兩個方式載入第一個專案後會記錄這裡。</li>';
+      return;
+    }
+    recentsList.innerHTML = projects.map((p) => {
+      const safePath = p.path.replace(/"/g, '&quot;');
+      return '<li data-path="' + safePath + '">' +
+        '<div class="row-main" data-action="load">' +
+          '<span class="name">' + escapeHtml(p.name) + '</span>' +
+          '<span class="source">' + escapeHtml(p.source || 'path') + '</span>' +
+          '<span class="meta">' + new Date(p.loaded_at).toLocaleString() + '</span>' +
+        '</div>' +
+        '<button class="delete" data-action="delete" title="刪除這筆紀錄（不會刪除實際檔案）">×</button>' +
+      '</li>';
+    }).join('');
+    recentsList.querySelectorAll('li[data-path]').forEach((li) => {
+      const path = li.dataset.path;
+      const main = li.querySelector('[data-action="load"]');
+      const del = li.querySelector('[data-action="delete"]');
+      if (main) main.addEventListener('click', () => loadDeckByPath(path));
+      if (del) del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await fetch('/api/recent/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+          });
+          loadRecents();
+        } catch (err) {
+          setStatus('刪除失敗：' + err, 'error');
+        }
+      });
+    });
+  } catch (e) {
+    recentsList.innerHTML = '<li class="empty">無法載入最近紀錄</li>';
+  }
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  if (e.dataTransfer.files?.[0]) loadDeckByZip(e.dataTransfer.files[0]);
+});
+zipInput.addEventListener('change', (e) => {
+  if (e.target.files?.[0]) loadDeckByZip(e.target.files[0]);
+});
+pathForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  loadDeckByPath(pathInput.value.trim());
+});
+
+loadRecents();
+</script>
+</body>
+</html>

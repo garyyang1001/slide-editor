@@ -10,10 +10,13 @@
 
 ```bash
 # A) 啟動首頁（拖 Claude Design zip 進來、或貼路徑、或從最近開過清單）
-python3 editor.py
+python3 main.py
 
 # B) 直接編輯指定 deck
-python3 editor.py path/to/deck.html
+python3 main.py path/to/deck.html
+
+# 或用 package 形式（同效）
+python3 -m slide_editor [DECK]
 ```
 
 ## 介紹影片
@@ -79,12 +82,14 @@ python3 editor.py path/to/deck.html
 ```bash
 git clone https://github.com/garyyang1001/slide-editor.git
 cd slide-editor
-python3 editor.py             # 啟動首頁
+python3 main.py             # 啟動首頁
 # 或
-python3 editor.py examples/demo.html   # 直接編輯指定 deck
+python3 main.py examples/demo.html   # 直接編輯指定 deck
 ```
 
 開瀏覽器到終端機印的網址（預設 `http://127.0.0.1:8765/`）。
+
+> 舊指令 `python3 editor.py` 仍然可用（保留為向後相容 shim）。
 
 如果想用「即時 AI 改寫」（按下「立即重寫」會 10–18 秒後跳對照），需要至少裝**其中一個** AI CLI：
 
@@ -102,7 +107,9 @@ python3 editor.py examples/demo.html   # 直接編輯指定 deck
 ## 使用方式
 
 ```
-python3 editor.py [DECK] [options]
+python3 main.py [DECK] [options]
+# or:
+python3 -m slide_editor [DECK] [options]
 
 DECK                  HTML 簡報檔的路徑（可省略 → 啟動首頁）
 
@@ -291,15 +298,33 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 ## 架構
 
-`editor.py` 是一支約 3000 行的 Python 腳本，包了標準庫的 `http.server`。做五件事：
+```
+slide-editor/
+├── main.py                    # 入口（13 行）
+├── editor.py                  # 向後相容 shim
+└── slide_editor/              # package
+    ├── __init__.py
+    ├── __main__.py            # python -m slide_editor 進入點
+    ├── server.py              # Config + Handler + main()  (~520 行)
+    ├── launcher.py            # zip 解壓 + recents + 模式切換  (~140)
+    ├── images.py              # multipart 解析器 + 圖片上傳  (~140)
+    ├── ai.py                  # Claude / Codex CLI backends  (~165)
+    └── overlay/
+        ├── editor.js          # 注入到 deck 的 JS bundle  (~1850 行)
+        └── launcher.html      # 啟動首頁  (~250 行)
+```
 
-1. **服務 deck 檔**　收到 GET 請求時把編輯器 JS bundle（toolbar、modal、所有事件處理）注入到 `</body>` 前面才回傳。原始檔不動。
+Python 程式碼總共約 1000 行，以前是單檔 3000+ 行。JS / HTML 拆出去獨立檔案，IDE 才有正確的 syntax highlighting。
+
+伺服器做五件事：
+
+1. **服務 deck 檔**　收到 GET 請求時把 `overlay/editor.js` 注入到 `</body>` 前面才回傳。原始檔不動。
 2. **存 slide 級的編輯**　`POST /save-slide`：讀原檔、regex 找對應 slide、換 inner HTML、寫回。寫之前自動備份到 `.backups/`。
 3. **管 prompt + 跑 AI**　`/queue-prompt`、`/delete-prompt`、`/clear-prompts`、`/list-prompts` 操作 `prompts.json`。`/ai-edit` shells out 到 `claude` 或 `codex` CLI 做即時改寫，依 `--backend` 旗標選擇。
 4. **處理圖片上傳**　`POST /upload-image` 自帶 multipart 解析器（不依賴已被 deprecate 的 `cgi` module），驗證副檔名、MIME、大小、檔名 sanitize、`realpath` 防穿越，存到 `<docroot>/images/`。
-5. **Launcher 模式**　不傳 deck arg 時，server 啟動成 launcher。`POST /launch/zip` 解壓到 `~/.slide-editor/projects/`、`POST /launch/path` 驗證路徑、`POST /launch/reset` 切回 launcher 模式。`~/.slide-editor/recent.json` 記最近 10 筆。
+5. **Launcher 模式**　不傳 deck arg 時，server 啟動成 launcher。`POST /launch/zip` 解壓到 `~/.slide-editor/projects/`、`POST /launch/path` 驗證路徑、`POST /launch/reset` 切回 launcher 模式。`~/.slide-editor/recent.json` 記最近 20 筆，`POST /api/recent/delete` 可單筆刪除。
 
-注入的 JS 是 Python 檔裡的字串模板。沒有 build step、沒有 npm、沒有外部 Python 套件。`python3 editor.py` 一行就跑。
+沒有 build step、沒有 npm、沒有外部 Python 套件。`python3 main.py` 一行就跑。
 
 ---
 
