@@ -264,6 +264,12 @@ EDITOR_JS_TEMPLATE = r"""
       '.__ft_minus,.__ft_plus{font-size:18px;line-height:0.7;min-width:36px;text-align:center;font-weight:300}',
       '.__ft_size{padding:8px 14px;font-size:11px;letter-spacing:0.05em;color:var(--ed-gray);font-family:var(--ed-mono);min-width:56px;text-align:center;border-right:1px solid var(--ed-line);user-select:none}',
       '.__ft_reset{font-size:11px;letter-spacing:0.1em;text-transform:uppercase}',
+      '.__ft_select{appearance:none;-webkit-appearance:none;background:transparent;border:0;border-right:1px solid var(--ed-line);padding:8px 26px 8px 14px;font-family:inherit;font-size:12px;color:var(--ed-ink);cursor:pointer;line-height:1;letter-spacing:0;background-image:url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'8\' height=\'5\' viewBox=\'0 0 8 5\'><path d=\'M0 0 L4 5 L8 0 Z\' fill=\'%232D2A26\'/></svg>");background-repeat:no-repeat;background-position:right 10px center}',
+      '.__ft_select:hover{background-color:var(--ed-ink);color:var(--ed-bg);background-image:url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'8\' height=\'5\' viewBox=\'0 0 8 5\'><path d=\'M0 0 L4 5 L8 0 Z\' fill=\'%23F5F5F0\'/></svg>")}',
+      '.__ft_select:focus{outline:0}',
+      '.__ft_select option{background:var(--ed-bg);color:var(--ed-ink);font-family:inherit}',
+      '.__ft_select#__ft_family__{min-width:140px;font-family:inherit}',
+      '.__ft_select#__ft_weight__{min-width:64px;font-family:var(--ed-mono);text-align:center}',
 
       // Images — drop target highlight, hover affordance, resize handles
       'img.__editor_image__{user-select:none;-webkit-user-drag:none;max-width:none}',
@@ -840,13 +846,74 @@ EDITOR_JS_TEMPLATE = r"""
     // ──────────────────────────────────────────────────────────
     // FONT-SIZE FLOATING TOOLBAR
     // ──────────────────────────────────────────────────────────
+    // Curated Google Fonts catalog. Mix of CJK-supporting and Latin-only,
+    // sans/serif/mono. CJK-supporting ones (cn:true) actually render
+    // Traditional Chinese; Latin-only fonts will fall through to the
+    // browser's CJK fallback for any 中文 characters.
+    var FONT_CATALOG = [
+      { name: 'Noto Sans TC', weights: [300, 400, 500, 700], cn: true,  group: '繁中 ／ Sans' },
+      { name: 'Noto Serif TC', weights: [300, 400, 500, 700], cn: true,  group: '繁中 ／ Serif' },
+      { name: 'Inter', weights: [300, 400, 500, 700, 900], cn: false, group: 'Latin ／ Sans' },
+      { name: 'Plus Jakarta Sans', weights: [300, 400, 500, 700, 800], cn: false, group: 'Latin ／ Sans' },
+      { name: 'IBM Plex Sans', weights: [300, 400, 500, 700], cn: false, group: 'Latin ／ Sans' },
+      { name: 'Manrope', weights: [300, 400, 500, 700, 800], cn: false, group: 'Latin ／ Sans' },
+      { name: 'Space Grotesk', weights: [300, 400, 500, 700], cn: false, group: 'Latin ／ Sans' },
+      { name: 'DM Sans', weights: [400, 500, 700, 900], cn: false, group: 'Latin ／ Sans' },
+      { name: 'Crimson Pro', weights: [300, 400, 500, 700], cn: false, group: 'Latin ／ Serif' },
+      { name: 'Lora', weights: [400, 500, 700], cn: false, group: 'Latin ／ Serif' },
+      { name: 'Playfair Display', weights: [400, 500, 700, 900], cn: false, group: 'Latin ／ Serif' },
+      { name: 'JetBrains Mono', weights: [300, 400, 500, 700], cn: false, group: 'Mono' },
+      { name: 'IBM Plex Mono', weights: [300, 400, 500, 700], cn: false, group: 'Mono' }
+    ];
+    var FONT_BY_NAME = {};
+    FONT_CATALOG.forEach(function (f) { FONT_BY_NAME[f.name] = f; });
+
+    var loadedFontKeys = new Set();
+    function loadGoogleFont(name) {
+      var meta = FONT_BY_NAME[name];
+      if (!meta) return;
+      var key = name;
+      if (loadedFontKeys.has(key)) return;
+      loadedFontKeys.add(key);
+      var family = name.replace(/ /g, '+');
+      var url = 'https://fonts.googleapis.com/css2?family=' + family +
+                ':wght@' + meta.weights.join(';') + '&display=swap';
+      var link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = url;
+      document.head.appendChild(link);
+    }
+
+    function buildFontFamilyOptions() {
+      var html = '<option value="">繼承</option>';
+      var lastGroup = null;
+      FONT_CATALOG.forEach(function (f) {
+        if (f.group !== lastGroup) {
+          if (lastGroup !== null) html += '</optgroup>';
+          html += '<optgroup label="' + f.group + '">';
+          lastGroup = f.group;
+        }
+        html += '<option value="' + f.name + '">' + f.name + (f.cn ? '　·　繁中' : '') + '</option>';
+      });
+      html += '</optgroup>';
+      return html;
+    }
+
+    function buildFontWeightOptions() {
+      var weights = [300, 400, 500, 700];
+      return '<option value="">繼承</option>' +
+             weights.map(function (w) { return '<option value="' + w + '">' + w + '</option>'; }).join('');
+    }
+
     var fontToolbar = document.createElement('div');
     fontToolbar.id = '__font_toolbar__';
     fontToolbar.innerHTML = [
+      '<select class="__ft_select" id="__ft_family__" title="字體（Google Fonts）">' + buildFontFamilyOptions() + '</select>',
+      '<select class="__ft_select" id="__ft_weight__" title="字重">' + buildFontWeightOptions() + '</select>',
       '<button class="__ft_btn __ft_minus" id="__ft_minus__" title="縮小 2px（Alt+↓）">−</button>',
       '<span class="__ft_size" id="__ft_size__">16px</span>',
       '<button class="__ft_btn __ft_plus" id="__ft_plus__" title="放大 2px（Alt+↑）">+</button>',
-      '<button class="__ft_btn __ft_reset" id="__ft_reset__" title="還原預設大小">RESET</button>'
+      '<button class="__ft_btn __ft_reset" id="__ft_reset__" title="還原預設">RESET</button>'
     ].join('');
     document.body.appendChild(fontToolbar);
 
@@ -854,8 +921,31 @@ EDITOR_JS_TEMPLATE = r"""
     var ftPlus = document.getElementById('__ft_plus__');
     var ftReset = document.getElementById('__ft_reset__');
     var ftSize = document.getElementById('__ft_size__');
+    var ftFamily = document.getElementById('__ft_family__');
+    var ftWeight = document.getElementById('__ft_weight__');
 
     var focusedEditable = null;
+
+    function syncToolbarToElement(el) {
+      // Sync size display
+      var size = parseFloat(getComputedStyle(el).fontSize);
+      ftSize.textContent = Math.round(size) + 'px';
+
+      // Sync font family — show the catalog font name iff the inline style
+      // is exactly one of our catalog fonts. Otherwise show "繼承".
+      var inlineFamily = (el.style.fontFamily || '').trim();
+      var matchedFamily = '';
+      // Inline value might be: "'Noto Sans TC', sans-serif" — extract first token
+      if (inlineFamily) {
+        var first = inlineFamily.split(',')[0].replace(/['"]/g, '').trim();
+        if (FONT_BY_NAME[first]) matchedFamily = first;
+      }
+      ftFamily.value = matchedFamily;
+
+      // Sync font weight from inline style
+      var inlineWeight = (el.style.fontWeight || '').trim();
+      ftWeight.value = inlineWeight;
+    }
 
     function positionFontToolbar(el) {
       if (!el) return;
@@ -870,8 +960,7 @@ EDITOR_JS_TEMPLATE = r"""
       if (left < window.scrollX + 8) left = window.scrollX + 8;
       fontToolbar.style.top = top + 'px';
       fontToolbar.style.left = left + 'px';
-      var size = parseFloat(getComputedStyle(el).fontSize);
-      ftSize.textContent = Math.round(size) + 'px';
+      syncToolbarToElement(el);
     }
 
     document.addEventListener('focusin', function (e) {
@@ -884,14 +973,24 @@ EDITOR_JS_TEMPLATE = r"""
     });
     document.addEventListener('focusout', function () {
       setTimeout(function () {
-        if (!document.activeElement || !document.activeElement.isContentEditable) {
+        var active = document.activeElement;
+        // Keep the toolbar (and our focusedEditable reference) alive while
+        // the user is interacting with the toolbar's selects/buttons.
+        if (active && active.closest && active.closest('#__font_toolbar__')) return;
+        if (!active || !active.isContentEditable) {
           fontToolbar.classList.remove('show');
           focusedEditable = null;
         }
       }, 50);
     });
 
-    fontToolbar.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    // Don't blur contenteditable on click within the toolbar — except for
+    // <select>, which needs its native dropdown to open (preventDefault on
+    // mousedown blocks that on macOS).
+    fontToolbar.addEventListener('mousedown', function (e) {
+      if (e.target.tagName === 'SELECT' || e.target.tagName === 'OPTION') return;
+      e.preventDefault();
+    });
 
     function changeFontSize(delta) {
       if (!focusedEditable) return;
@@ -911,7 +1010,10 @@ EDITOR_JS_TEMPLATE = r"""
     ftPlus.addEventListener('click', function () { changeFontSize(2); });
     ftReset.addEventListener('click', function () {
       if (!focusedEditable) return;
+      // Reset all three: size + family + weight
       focusedEditable.style.fontSize = '';
+      focusedEditable.style.fontFamily = '';
+      focusedEditable.style.fontWeight = '';
       var slide = findSlide(focusedEditable);
       var key = slide ? getSlideKey(slide) : '';
       if (key) {
@@ -919,6 +1021,50 @@ EDITOR_JS_TEMPLATE = r"""
         setStatus(dirty.size + ' 張未存', 'dirty');
       }
       setTimeout(function () { positionFontToolbar(focusedEditable); }, 0);
+    });
+
+    function applyFontFamily(name) {
+      if (!focusedEditable) return;
+      if (!name) {
+        focusedEditable.style.fontFamily = '';
+      } else {
+        loadGoogleFont(name);
+        // Use the font + sensible fallback chain
+        focusedEditable.style.fontFamily = "'" + name + "', 'Noto Sans TC', 'PingFang TC', sans-serif";
+      }
+      var slide = findSlide(focusedEditable);
+      var key = slide ? getSlideKey(slide) : '';
+      if (key) {
+        dirty.add(key);
+        setStatus(dirty.size + ' 張未存', 'dirty');
+      }
+      setTimeout(function () { if (focusedEditable) positionFontToolbar(focusedEditable); }, 50);
+    }
+
+    function applyFontWeight(weight) {
+      if (!focusedEditable) return;
+      focusedEditable.style.fontWeight = weight || '';
+      var slide = findSlide(focusedEditable);
+      var key = slide ? getSlideKey(slide) : '';
+      if (key) {
+        dirty.add(key);
+        setStatus(dirty.size + ' 張未存', 'dirty');
+      }
+      setTimeout(function () { if (focusedEditable) positionFontToolbar(focusedEditable); }, 0);
+    }
+
+    // Prevent <select> mousedown from blurring contenteditable.
+    // (Native <select> dropdowns don't blur on mousedown by default,
+    //  but the toolbar's mousedown.preventDefault below would block opening.
+    //  Solution: don't preventDefault on the select itself.)
+    ftFamily.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    ftWeight.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+
+    ftFamily.addEventListener('change', function (e) {
+      applyFontFamily(e.target.value);
+    });
+    ftWeight.addEventListener('change', function (e) {
+      applyFontWeight(e.target.value);
     });
 
     window.addEventListener('keydown', function (e) {
@@ -1358,10 +1504,13 @@ EDITOR_JS_TEMPLATE = r"""
       '    <p>4.　位移用 transform: translate 寫在 inline style，原本版面不會崩。</p>',
       '  </div>',
       '  <div class="__help_section">',
-      '    <h4>方式四　改文字大小</h4>',
-      '    <p>點任何文字 → 上方會浮出小工具列：</p>',
-      '    <p class="__indent"><b>−</b> 縮小 2px　／　<b>+</b> 放大 2px　／　<b>RESET</b> 還原預設</p>',
-      '    <p>大小寫進元素的 inline font-size，跟著 ⌘S 一起存檔。</p>',
+      '    <h4>方式四　改字體 ／ 字重 ／ 大小</h4>',
+      '    <p>點任何文字 → 上方浮出小工具列：</p>',
+      '    <p class="__indent"><b>字體下拉</b>　Google Fonts 13 款（Noto Sans/Serif TC、Inter、Plus Jakarta、IBM Plex、Manrope、Crimson Pro、Lora、JetBrains Mono…），選了動態載入</p>',
+      '    <p class="__indent"><b>字重下拉</b>　300 ／ 400 ／ 500 ／ 700</p>',
+      '    <p class="__indent"><b>− ／ +</b>　字級減／加 2px（也可 Alt+↑ ／ Alt+↓）</p>',
+      '    <p class="__indent"><b>RESET</b>　還原所有 font 設定（family、weight、size 一起清掉）</p>',
+      '    <p>所有改動寫進元素的 inline style，跟著 ⌘S 一起存檔。</p>',
       '  </div>',
       '  <div class="__help_section">',
       '    <h4>方式五　插入與調整圖片</h4>',
