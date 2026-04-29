@@ -178,6 +178,8 @@ EDITOR_JS_TEMPLATE = r"""
       '#__editor_bar__.__dragging{opacity:0.92}',
       '.__bar_top{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--ed-line);font-size:11px;letter-spacing:0.1em;color:var(--ed-gray);text-transform:uppercase;cursor:move}',
       '.__bar_top:hover{background:rgba(45,42,38,0.03)}',
+      '.__bar_home{background:transparent;border:0;padding:2px 8px;font-family:inherit;font-size:11px;letter-spacing:0.1em;font-weight:500;color:var(--ed-ink);cursor:pointer;text-transform:uppercase;line-height:1;border:1px solid var(--ed-line)}',
+      '.__bar_home:hover{background:var(--ed-ink);color:var(--ed-bg);border-color:var(--ed-ink)}',
       '.__bar_brand{color:var(--ed-ink);font-weight:500}',
       '.__bar_sep{color:var(--ed-line)}',
       '.__bar_hint{flex:1;text-transform:none;letter-spacing:0.025em;font-size:12px}',
@@ -200,8 +202,8 @@ EDITOR_JS_TEMPLATE = r"""
       '.__prompt_dot{position:absolute;z-index:99999;background:var(--ed-red);color:var(--ed-bg);font-family:var(--ed-font);font-size:11px;font-weight:500;letter-spacing:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;transform:translate(-50%,-50%);transition:opacity 280ms var(--ed-ease)}',
       '.__prompt_dot:hover{opacity:0.85}',
 
-      '#__prompt_modal__,#__help_modal__{position:fixed;inset:0;background:rgba(45,42,38,0.55);z-index:2147483646;display:none;align-items:center;justify-content:center;font-family:var(--ed-font);font-weight:300;color:var(--ed-ink)}',
-      '#__prompt_modal__.show,#__help_modal__.show{display:flex}',
+      '#__prompt_modal__,#__help_modal__,#__home_modal__{position:fixed;inset:0;background:rgba(45,42,38,0.55);z-index:2147483646;display:none;align-items:center;justify-content:center;font-family:var(--ed-font);font-weight:300;color:var(--ed-ink)}',
+      '#__prompt_modal__.show,#__help_modal__.show,#__home_modal__.show{display:flex}',
       '.__pm_card,.__help_card{background:var(--ed-bg);border:1px solid var(--ed-ink);padding:32px;max-width:680px;width:90%;max-height:85vh;overflow:auto;box-sizing:border-box}',
       '.__help_card{max-width:760px}',
       '.__pm_card h3,.__help_card h3{margin:0 0 8px;font-size:18px;letter-spacing:0.025em;font-weight:500;line-height:1.4}',
@@ -310,6 +312,7 @@ EDITOR_JS_TEMPLATE = r"""
     bar.id = '__editor_bar__';
     bar.innerHTML = [
       '<div class="__bar_top">',
+      '  <button class="__bar_home" id="__home_btn__" title="返回首頁（未存檔會提醒）">← 首頁</button>',
       '  <span class="__bar_brand">編輯器</span>',
       '  <span class="__bar_sep">／</span>',
       '  <span class="__bar_hint">點任何文字直接改　·　標記位置讓 AI 改寫</span>',
@@ -491,6 +494,8 @@ EDITOR_JS_TEMPLATE = r"""
         if (document.body.classList.contains('__move_mode__')) exitMoveMode();
         var hm = document.getElementById('__help_modal__');
         if (hm && hm.classList.contains('show')) closeHelp();
+        var homeM = document.getElementById('__home_modal__');
+        if (homeM && homeM.classList.contains('show')) homeM.classList.remove('show');
       }
       if (e.key === '?' && !isTyping(e.target)) { e.preventDefault(); openHelp(); }
     });
@@ -1562,6 +1567,11 @@ EDITOR_JS_TEMPLATE = r"""
       '    <p>不小心拖到看不見？雙擊頂端那條還原到右下角預設。</p>',
       '  </div>',
       '  <div class="__help_section">',
+      '    <h4>返回首頁</h4>',
+      '    <p>工具列左上角「← 首頁」按鈕回到啟動頁，可以換別份簡報來編。</p>',
+      '    <p>有未存檔變動會跳對話框，三個選擇：先存檔再返回、丟棄變動返回、取消。</p>',
+      '  </div>',
+      '  <div class="__help_section">',
       '    <h4>刪除元素</h4>',
       '    <p>右鍵任何元素 → 跳出選單（會用紅框標出當前要刪的）：</p>',
       '    <p class="__indent">·　<b>刪除這個元素</b>　只刪你點到的</p>',
@@ -1588,6 +1598,72 @@ EDITOR_JS_TEMPLATE = r"""
     document.getElementById('__help_close__').addEventListener('click', closeHelp);
     document.getElementById('__help_done__').addEventListener('click', closeHelp);
     helpModal.addEventListener('click', function (e) { if (e.target === helpModal) closeHelp(); });
+
+    // ──────────────────────────────────────────────────────────
+    // HOME (return-to-launcher) — guards against unsaved edits
+    // ──────────────────────────────────────────────────────────
+    var homeBtn = document.getElementById('__home_btn__');
+    var homeModal = document.createElement('div');
+    homeModal.id = '__home_modal__';
+    homeModal.innerHTML = [
+      '<div class="__pm_card" style="max-width:520px">',
+      '  <h3>有未存檔的變動</h3>',
+      '  <p class="__pm_subtitle"><span id="__home_count__">0</span> 張 slide 還沒寫回原檔</p>',
+      '  <div class="__pm_target" style="white-space:normal">如果直接返回首頁，未存的變動會留在當前的瀏覽器記憶體裡，但不會寫到 HTML 檔。決定要怎麼做：</div>',
+      '  <div class="__pm_actions">',
+      '    <button class="__btn __btn-ghost" id="__home_cancel__">取消</button>',
+      '    <button class="__btn" id="__home_discard__">丟棄變動返回</button>',
+      '    <button class="__btn __btn-ink" id="__home_save__">先存檔再返回</button>',
+      '  </div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(homeModal);
+
+    var homeCount = document.getElementById('__home_count__');
+
+    async function goHome() {
+      try {
+        var r = await fetch('/launch/reset', { method: 'POST' });
+        var data = await r.json();
+        if (data && data.ok) {
+          // Clear dirty so beforeunload doesn't double-prompt
+          dirty.clear();
+          window.location.href = data.redirect;
+        }
+      } catch (e) {
+        alert('返回首頁失敗：' + e);
+      }
+    }
+
+    homeBtn.addEventListener('click', function () {
+      if (dirty.size === 0) {
+        goHome();
+        return;
+      }
+      homeCount.textContent = dirty.size;
+      homeModal.classList.add('show');
+    });
+    document.getElementById('__home_cancel__').addEventListener('click', function () {
+      homeModal.classList.remove('show');
+    });
+    document.getElementById('__home_discard__').addEventListener('click', function () {
+      homeModal.classList.remove('show');
+      goHome();
+    });
+    document.getElementById('__home_save__').addEventListener('click', async function () {
+      // Save first, then go.  saveAll empties the dirty set on success.
+      await saveAll();
+      if (dirty.size > 0) {
+        // Some slides failed to save — let user see the status, don't navigate
+        homeModal.classList.remove('show');
+        return;
+      }
+      homeModal.classList.remove('show');
+      goHome();
+    });
+    homeModal.addEventListener('click', function (e) {
+      if (e.target === homeModal) homeModal.classList.remove('show');
+    });
 
     // ──────────────────────────────────────────────────────────
     // CONTEXT MENU — right-click any element to delete it
@@ -1820,7 +1896,7 @@ LAUNCHER_HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>slide-editor</title>
+<title>Claude Slide Editor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
@@ -1885,9 +1961,9 @@ LAUNCHER_HTML = r"""<!doctype html>
 <main>
   <div class="cover">
     <div class="brand">好事發生數位　·　OHYA DIGITAL</div>
-    <h1>slide-editor</h1>
+    <h1>Claude Slide Editor</h1>
     <hr class="rule-ink">
-    <p class="tagline">瀏覽器內 HTML 簡報編輯器　·　從 Claude Design 出第一版，本機接手後續迭代</p>
+    <p class="tagline">好事發生數位出品，版權沒有，歡迎隨意取用。</p>
   </div>
 
   <section>
@@ -2451,6 +2527,18 @@ def make_handler(config):
                     200,
                     {"ok": True, "redirect": "/" + urllib.parse.quote(config.deck_file)},
                 )
+                return
+
+            if self.path == "/launch/reset":
+                # Flip the live config back to launcher mode so GET / serves
+                # the cover page again. Used by the editor's "← 首頁" button.
+                config.mode = "launcher"
+                config.docroot = None
+                config.deck_path = None
+                config.deck_file = None
+                config.backup_dir = None
+                config.prompts_file = None
+                self._send_json(200, {"ok": True, "redirect": "/"})
                 return
 
             if self.path == "/launch/path":
