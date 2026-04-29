@@ -20,6 +20,7 @@ License: MIT
 """
 import argparse
 import http.server
+import io
 import json
 import os
 import re
@@ -30,7 +31,9 @@ import tempfile
 import threading
 import time
 import urllib.parse
+import zipfile
 from datetime import datetime
+from pathlib import Path
 
 
 def load_prompts(path):
@@ -285,6 +288,17 @@ EDITOR_JS_TEMPLATE = r"""
       '.__resize_handle__.__se{cursor:nwse-resize}',
       '#__upload_status__{position:fixed;top:24px;right:24px;z-index:2147483645;background:var(--ed-ink);color:var(--ed-bg);padding:8px 16px;font:400 11px/1.5 var(--ed-font);letter-spacing:0.1em;text-transform:uppercase;display:none}',
       '#__upload_status__.show{display:block}',
+
+      // Right-click context menu (delete element)
+      '#__context_menu__{position:absolute;z-index:2147483646;background:var(--ed-bg-warm);border:1px solid var(--ed-ink);font-family:var(--ed-font);font-size:13px;font-weight:300;display:none;min-width:240px}',
+      '#__context_menu__.show{display:block}',
+      '.__cm_header{padding:10px 16px;font-size:11px;letter-spacing:0.1em;color:var(--ed-gray);text-transform:uppercase;border-bottom:1px solid var(--ed-line);font-family:var(--ed-mono)}',
+      '.__cm_item{display:block;width:100%;text-align:left;padding:12px 16px;font-family:inherit;font-size:14px;color:var(--ed-ink);cursor:pointer;background:transparent;border:0;border-bottom:1px solid var(--ed-line);letter-spacing:0.025em}',
+      '.__cm_item:last-child{border-bottom:0}',
+      '.__cm_item:hover{background:var(--ed-ink);color:var(--ed-bg);opacity:1}',
+      '.__cm_item.__danger:hover{background:var(--ed-red);color:var(--ed-bg)}',
+      '.__cm_meta{padding:0 16px 10px;font-size:11px;color:var(--ed-gray);font-family:var(--ed-mono);letter-spacing:0.05em;line-height:1.5;word-break:break-word}',
+      '.__cm_target_outline{outline:2px solid var(--ed-red) !important;outline-offset:4px;background:rgba(200,70,48,0.06) !important}',
       ''
     ].join('\n');
     document.head.appendChild(style);
@@ -1548,6 +1562,14 @@ EDITOR_JS_TEMPLATE = r"""
       '    <p>不小心拖到看不見？雙擊頂端那條還原到右下角預設。</p>',
       '  </div>',
       '  <div class="__help_section">',
+      '    <h4>刪除元素</h4>',
+      '    <p>右鍵任何元素 → 跳出選單（會用紅框標出當前要刪的）：</p>',
+      '    <p class="__indent">·　<b>刪除這個元素</b>　只刪你點到的</p>',
+      '    <p class="__indent">·　<b>刪除外層容器</b>　刪整個包住它的 div / 卡片 / section</p>',
+      '    <p class="__indent">·　<b>取消</b>　關閉選單什麼都不做</p>',
+      '    <p>不小心刪錯？.backups/ 有最近 20 份歷史，可以從那邊還原。</p>',
+      '  </div>',
+      '  <div class="__help_section">',
       '    <h4>注意事項</h4>',
       '    <p>·　「立即重寫」每次會用你的 Claude Code 訂閱呼叫一次，請勿暴衝。</p>',
       '    <p>·　處理完佇列後，prompts.json 會自動清空，避免下次重複跑。</p>',
@@ -1567,6 +1589,121 @@ EDITOR_JS_TEMPLATE = r"""
     document.getElementById('__help_done__').addEventListener('click', closeHelp);
     helpModal.addEventListener('click', function (e) { if (e.target === helpModal) closeHelp(); });
 
+    // ──────────────────────────────────────────────────────────
+    // CONTEXT MENU — right-click any element to delete it
+    // ──────────────────────────────────────────────────────────
+    var contextMenu = document.createElement('div');
+    contextMenu.id = '__context_menu__';
+    document.body.appendChild(contextMenu);
+
+    var ctxTarget = null;
+
+    function describeElement(el) {
+      var tag = el.tagName.toLowerCase();
+      var cls = el.className && typeof el.className === 'string'
+        ? '.' + el.className.split(' ').filter(Boolean).slice(0, 2).join('.')
+        : '';
+      var text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.length > 50) text = text.slice(0, 50) + '…';
+      return '<' + tag + cls + '>' + (text ? '　·　' + text : '');
+    }
+
+    function clearCtxOutline() {
+      document.querySelectorAll('.__cm_target_outline').forEach(function (el) {
+        el.classList.remove('__cm_target_outline');
+      });
+    }
+
+    function hideContextMenu() {
+      contextMenu.classList.remove('show');
+      ctxTarget = null;
+      clearCtxOutline();
+    }
+
+    function showContextMenu(el, x, y) {
+      var slide = findSlide(el);
+      if (!slide) return;
+      if (el === slide) return;  // never let the user delete the slide section itself
+      ctxTarget = el;
+      clearCtxOutline();
+      el.classList.add('__cm_target_outline');
+
+      var parentEl = el.parentElement;
+      var canDeleteParent = parentEl && parentEl !== slide;
+
+      contextMenu.innerHTML = [
+        '<div class="__cm_header">右鍵選單</div>',
+        '<div class="__cm_meta" id="__cm_target_meta__"></div>',
+        '<button class="__cm_item __danger" data-action="delete">刪除這個元素</button>',
+        canDeleteParent ? '<button class="__cm_item __danger" data-action="delete-parent">刪除外層容器</button>' : '',
+        '<button class="__cm_item" data-action="cancel">取消</button>'
+      ].filter(Boolean).join('');
+      document.getElementById('__cm_target_meta__').textContent = describeElement(el);
+
+      contextMenu.classList.add('show');
+      // Position; clamp to viewport
+      var rect = contextMenu.getBoundingClientRect();
+      var maxX = window.scrollX + window.innerWidth - rect.width - 8;
+      var maxY = window.scrollY + window.innerHeight - rect.height - 8;
+      contextMenu.style.left = Math.max(8, Math.min(maxX, x + window.scrollX)) + 'px';
+      contextMenu.style.top = Math.max(8, Math.min(maxY, y + window.scrollY)) + 'px';
+    }
+
+    document.addEventListener('contextmenu', function (e) {
+      // Skip our own UI surfaces
+      if (e.target.closest('#__editor_bar__') ||
+          e.target.closest('#__prompt_modal__') ||
+          e.target.closest('#__help_modal__') ||
+          e.target.closest('#__font_toolbar__') ||
+          e.target.closest('#__handle_layer__') ||
+          e.target.closest('#__context_menu__')) return;
+      var slide = findSlide(e.target);
+      if (!slide) return;
+      e.preventDefault();
+      showContextMenu(e.target, e.clientX, e.clientY);
+    });
+
+    contextMenu.addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      var action = btn.dataset.action;
+      if (action === 'cancel' || !ctxTarget) { hideContextMenu(); return; }
+      var slide = findSlide(ctxTarget);
+      if (!slide) { hideContextMenu(); return; }
+      var key = getSlideKey(slide);
+
+      var toRemove = ctxTarget;
+      if (action === 'delete-parent') {
+        toRemove = ctxTarget.parentElement;
+        if (!toRemove || toRemove === slide) { hideContextMenu(); return; }
+      }
+      // Detach references to anything we're about to delete
+      if (selectedImage && (toRemove === selectedImage || toRemove.contains(selectedImage))) {
+        clearSelection();
+      }
+      if (focusedEditable && (toRemove === focusedEditable || toRemove.contains(focusedEditable))) {
+        focusedEditable = null;
+        fontToolbar.classList.remove('show');
+      }
+      toRemove.remove();
+      if (key) {
+        dirty.add(key);
+        setStatus(dirty.size + ' 張未存', 'dirty');
+      }
+      hideContextMenu();
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!contextMenu.classList.contains('show')) return;
+      if (e.target.closest('#__context_menu__')) return;
+      hideContextMenu();
+    });
+    window.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && contextMenu.classList.contains('show')) {
+        hideContextMenu();
+      }
+    });
+
     refreshAllPrompts();
     window.addEventListener('resize', refreshDots);
     window.addEventListener('scroll', refreshDots, true);
@@ -1574,6 +1711,331 @@ EDITOR_JS_TEMPLATE = r"""
   });
 })();
 </script>
+"""
+
+
+# ────────────────────────────────────────────────────────────────────
+# LAUNCHER (no-deck startup mode)
+# Server boots without a deck arg → serves a cover page that lets the
+# user pick a deck via zip upload or by typing a path.  Switching to
+# editor mode mutates the shared Config so the rest of the server
+# starts behaving as if the deck had been passed at the CLI.
+# ────────────────────────────────────────────────────────────────────
+
+WORKSPACE_DIR = Path.home() / ".slide-editor" / "projects"
+RECENT_FILE = Path.home() / ".slide-editor" / "recent.json"
+SAFE_BASENAME_RE = re.compile(r"[^A-Za-z0-9._一-鿿-]")
+
+
+def safe_workspace_name(raw):
+    base = SAFE_BASENAME_RE.sub("_", raw or "deck")
+    return base.strip("._") or "deck"
+
+
+def extract_claude_zip(zip_bytes, source_name):
+    """Write zip to ~/.slide-editor/projects/<name>-<ts>/, return main HTML path."""
+    base = safe_workspace_name(os.path.splitext(source_name)[0])
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    project_dir = WORKSPACE_DIR / f"{base}-{ts}"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    real_root = os.path.realpath(project_dir)
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            for member in zf.infolist():
+                if member.is_dir():
+                    continue
+                name = member.filename
+                # Skip macOS resource forks and dotfiles at root
+                if "__MACOSX" in name or os.path.basename(name).startswith("._"):
+                    continue
+                target = os.path.realpath(os.path.join(project_dir, name))
+                if not target.startswith(real_root + os.sep) and target != real_root:
+                    raise ValueError("path traversal blocked: %s" % name)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with zf.open(member) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    except zipfile.BadZipFile as e:
+        raise ValueError("not a valid zip: %s" % e)
+
+    # Find the main HTML — prefer top-level, then any sub-folder
+    htmls_top = sorted(p for p in project_dir.iterdir() if p.is_file() and p.suffix.lower() == ".html")
+    if htmls_top:
+        return str(htmls_top[0])
+    for root, _, files in os.walk(project_dir):
+        for f in sorted(files):
+            if f.lower().endswith(".html"):
+                return os.path.join(root, f)
+    raise ValueError("zip contains no .html file")
+
+
+def load_recent():
+    if not RECENT_FILE.exists():
+        return []
+    try:
+        with open(RECENT_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("projects", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def save_recent(deck_path, source):
+    RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    items = load_recent()
+    deck_path = str(deck_path)
+    items = [p for p in items if p.get("path") != deck_path]
+    items.insert(
+        0,
+        {
+            "path": deck_path,
+            "name": os.path.basename(deck_path),
+            "source": source,
+            "loaded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        },
+    )
+    items = items[:10]
+    tmp = str(RECENT_FILE) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"projects": items}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, str(RECENT_FILE))
+
+
+def switch_to_editor_mode(config, deck_path):
+    """Mutate the shared config so the server starts serving deck_path."""
+    deck_path = os.path.abspath(deck_path)
+    if not os.path.isfile(deck_path):
+        raise ValueError("not a file: %s" % deck_path)
+    config.docroot = os.path.dirname(deck_path)
+    config.deck_path = deck_path
+    config.deck_file = os.path.basename(deck_path)
+    config.backup_dir = os.path.join(config.docroot, ".backups")
+    config.prompts_file = os.path.join(config.docroot, "prompts.json")
+    config.mode = "editor"
+    os.chdir(config.docroot)
+
+
+LAUNCHER_HTML = r"""<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>slide-editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#2D2A26; --bg:#F5F5F0; --gray:#8C8C88; --line:#E0E0D8;
+    --red:#C84630; --bg-warm:#FAFAF5;
+    --font:"Noto Sans TC","PingFang TC","Heiti TC",-apple-system,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--font);font-weight:300;-webkit-font-smoothing:antialiased;line-height:1.6}
+  body{padding:64px 32px;display:flex;justify-content:center}
+  main{max-width:920px;width:100%}
+  /* Cover */
+  .cover{padding:48px 0 64px;border-bottom:1px solid var(--line);margin-bottom:64px}
+  .brand{font-size:13px;letter-spacing:0.18em;color:var(--gray);text-transform:uppercase;margin-bottom:32px}
+  h1{font-size:96px;font-weight:300;letter-spacing:0.02em;line-height:1;margin-bottom:24px}
+  .tagline{font-size:24px;color:var(--ink);font-weight:300;letter-spacing:0.02em;max-width:680px}
+  .rule-ink{border:0;border-top:1px solid var(--ink);width:160px;margin:24px 0}
+  /* Sections */
+  section{margin-bottom:56px}
+  section h2{font-size:14px;font-weight:500;letter-spacing:0.18em;color:var(--gray);text-transform:uppercase;margin-bottom:24px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  section .lead{font-size:14px;color:var(--gray);margin-bottom:16px;line-height:1.7}
+  /* Drop zone */
+  .drop{border:1px dashed var(--ink);background:var(--bg-warm);padding:48px 32px;text-align:center;cursor:pointer;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .drop:hover,.drop.over{background:var(--ink);color:var(--bg)}
+  .drop:hover .drop-hint,.drop.over .drop-hint{color:var(--bg)}
+  .drop strong{display:block;font-size:18px;font-weight:500;margin-bottom:8px;letter-spacing:0.02em}
+  .drop-hint{font-size:13px;color:var(--gray);transition:color 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .drop input[type=file]{display:none}
+  /* Path form */
+  .path-form{display:flex;gap:12px;align-items:stretch}
+  .path-form input[type=text]{flex:1;border:1px solid var(--line);background:var(--bg-warm);padding:14px 18px;font:300 15px/1.5 var(--mono);color:var(--ink);min-width:0}
+  .path-form input[type=text]:focus{outline:0;border-color:var(--ink)}
+  .path-form button{border:1px solid var(--ink);background:var(--ink);color:var(--bg);padding:0 28px;font:400 13px/1 var(--font);letter-spacing:0.1em;cursor:pointer;transition:opacity 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .path-form button:hover{opacity:0.85}
+  .path-form button:disabled{opacity:0.4;cursor:wait}
+  /* Recents list */
+  .recents{list-style:none;border-top:1px solid var(--line)}
+  .recents li{padding:18px 0;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:16px;cursor:pointer;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .recents li:hover{background:var(--bg-warm)}
+  .recents .name{font-size:18px;color:var(--ink);font-weight:400;flex:1;letter-spacing:0.02em}
+  .recents .meta{font-size:11px;color:var(--gray);font-family:var(--mono);letter-spacing:0.05em}
+  .recents .source{font-size:11px;color:var(--red);letter-spacing:0.1em;text-transform:uppercase}
+  .recents .empty{padding:18px 0;color:var(--gray);font-style:italic;font-size:14px}
+  /* Status */
+  .status{margin-top:16px;font-size:13px;color:var(--gray);letter-spacing:0.05em;min-height:20px}
+  .status.error{color:var(--red)}
+  .status.ok{color:var(--ink)}
+  .loading-bar{display:none;height:1px;background:var(--line);position:relative;overflow:hidden;margin-top:8px}
+  .loading-bar.show{display:block}
+  .loading-bar::after{content:"";position:absolute;top:0;left:-30%;width:30%;height:100%;background:var(--ink);animation:sweep 1400ms cubic-bezier(0.25,0.46,0.45,0.94) infinite}
+  @keyframes sweep{0%{left:-30%}100%{left:100%}}
+  /* Footer */
+  footer{margin-top:96px;padding-top:32px;border-top:1px solid var(--line);font-size:12px;color:var(--gray);letter-spacing:0.05em;display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px}
+  footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink)}
+  footer a:hover{opacity:0.7}
+</style>
+</head>
+<body>
+<main>
+  <div class="cover">
+    <div class="brand">好事發生數位　·　OHYA DIGITAL</div>
+    <h1>slide-editor</h1>
+    <hr class="rule-ink">
+    <p class="tagline">瀏覽器內 HTML 簡報編輯器　·　從 Claude Design 出第一版，本機接手後續迭代</p>
+  </div>
+
+  <section>
+    <h2>1　拖 zip 進來</h2>
+    <p class="lead">把從 Claude Design 匯出的 zip 拖進下面區塊，或點擊選檔。系統會自動解壓到 ~/.slide-editor/projects/，找到 .html 並開啟編輯器。</p>
+    <label class="drop" id="drop">
+      <strong>拖放 zip 檔到這裡</strong>
+      <span class="drop-hint">或點擊選檔　·　支援 Claude Design 標準匯出</span>
+      <input type="file" id="zip-input" accept=".zip,application/zip">
+    </label>
+  </section>
+
+  <section>
+    <h2>2　或指定本機 deck 路徑</h2>
+    <p class="lead">已經解壓過、或從別的地方拿到的 .html 檔，直接給絕對路徑。</p>
+    <form class="path-form" id="path-form">
+      <input type="text" id="path-input" placeholder="/Users/.../deck.html" autocomplete="off" spellcheck="false">
+      <button type="submit">載入</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>3　最近開過</h2>
+    <ul class="recents" id="recents"></ul>
+  </section>
+
+  <div class="status" id="status"></div>
+  <div class="loading-bar" id="loading"></div>
+
+  <footer>
+    <span>好事發生數位　·　Gary　·　台中</span>
+    <span>
+      <a href="https://github.com/garyyang1001/slide-editor" target="_blank">GitHub</a>　·
+      <a href="https://ohya.co" target="_blank">ohya.co</a>
+    </span>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const drop = $('drop');
+const zipInput = $('zip-input');
+const pathForm = $('path-form');
+const pathInput = $('path-input');
+const recentsList = $('recents');
+const status = $('status');
+const loading = $('loading');
+
+function setStatus(text, level) {
+  status.textContent = text;
+  status.className = 'status' + (level ? ' ' + level : '');
+}
+function showLoading(yes) { loading.classList.toggle('show', yes); }
+
+async function loadDeckByZip(file) {
+  if (!file) return;
+  if (!/\.zip$/i.test(file.name)) {
+    setStatus('需要 .zip 檔', 'error');
+    return;
+  }
+  setStatus('上傳並解壓中…');
+  showLoading(true);
+  const fd = new FormData();
+  fd.append('zip', file);
+  try {
+    const r = await fetch('/launch/zip', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!data.ok) {
+      setStatus('失敗：' + (data.error || '未知'), 'error');
+      return;
+    }
+    setStatus('完成，跳轉中…', 'ok');
+    setTimeout(() => { window.location.href = data.redirect; }, 200);
+  } catch (e) {
+    setStatus('失敗：' + e, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function loadDeckByPath(path) {
+  if (!path) return;
+  setStatus('檢查路徑…');
+  showLoading(true);
+  try {
+    const r = await fetch('/launch/path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      setStatus('失敗：' + (data.error || '未知'), 'error');
+      return;
+    }
+    setStatus('完成，跳轉中…', 'ok');
+    setTimeout(() => { window.location.href = data.redirect; }, 200);
+  } catch (e) {
+    setStatus('失敗：' + e, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function loadRecents() {
+  try {
+    const r = await fetch('/api/recent');
+    const data = await r.json();
+    const projects = data.projects || [];
+    if (!projects.length) {
+      recentsList.innerHTML = '<li class="empty">還沒有最近紀錄。從上面兩個方式載入第一個專案後會記錄這裡。</li>';
+      return;
+    }
+    recentsList.innerHTML = projects.map((p) =>
+      '<li data-path="' + p.path.replace(/"/g, '&quot;') + '">' +
+        '<span class="name">' + escapeHtml(p.name) + '</span>' +
+        '<span class="source">' + escapeHtml(p.source || 'path') + '</span>' +
+        '<span class="meta">' + new Date(p.loaded_at).toLocaleString() + '</span>' +
+      '</li>'
+    ).join('');
+    recentsList.querySelectorAll('li[data-path]').forEach((li) => {
+      li.addEventListener('click', () => loadDeckByPath(li.dataset.path));
+    });
+  } catch (e) {
+    recentsList.innerHTML = '<li class="empty">無法載入最近紀錄</li>';
+  }
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  if (e.dataTransfer.files?.[0]) loadDeckByZip(e.dataTransfer.files[0]);
+});
+zipInput.addEventListener('change', (e) => {
+  if (e.target.files?.[0]) loadDeckByZip(e.target.files[0]);
+});
+pathForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  loadDeckByPath(pathInput.value.trim());
+});
+
+loadRecents();
+</script>
+</body>
+</html>
 """
 
 
@@ -1903,10 +2365,40 @@ def make_handler(config):
 
         def do_GET(self):
             path = urllib.parse.urlparse(self.path).path
+
+            # Launcher mode: any GET returns the cover page (or recents JSON)
+            if config.mode == "launcher":
+                if path == "/api/recent":
+                    self._send_json(200, {"projects": load_recent()})
+                    return
+                if path == "/" or path == "":
+                    body = LAUNCHER_HTML.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                # Anything else in launcher mode: 404
+                self.send_error(404, "launcher mode — only GET / works")
+                return
+
+            # Editor mode below
             if path == "/list-prompts":
                 with config.prompts_lock:
                     data = load_prompts(config.prompts_file)
                 self._send_json(200, data)
+                return
+            if path == "/api/recent":
+                self._send_json(200, {"projects": load_recent()})
+                return
+            if path == "/" or path == "":
+                # Redirect to the active deck
+                self.send_response(302)
+                self.send_header(
+                    "Location", "/" + urllib.parse.quote(config.deck_file)
+                )
+                self.end_headers()
                 return
             decoded = urllib.parse.unquote(path).lstrip("/")
             if decoded == config.deck_file:
@@ -1934,6 +2426,70 @@ def make_handler(config):
             super().do_GET()
 
         def do_POST(self):
+            # ── Launcher endpoints work in both launcher and editor mode ──
+            if self.path == "/launch/zip":
+                parts = parse_multipart_upload(self)
+                file_part = next((p for p in parts if p.get("filename")), None)
+                if not file_part:
+                    self._send_json(400, {"ok": False, "error": "no zip file in upload"})
+                    return
+                if not file_part["filename"].lower().endswith(".zip"):
+                    self._send_json(400, {"ok": False, "error": "expected a .zip file"})
+                    return
+                try:
+                    deck_path = extract_claude_zip(file_part["data"], file_part["filename"])
+                except (ValueError, OSError) as e:
+                    self._send_json(400, {"ok": False, "error": str(e)})
+                    return
+                try:
+                    switch_to_editor_mode(config, deck_path)
+                except ValueError as e:
+                    self._send_json(500, {"ok": False, "error": str(e)})
+                    return
+                save_recent(deck_path, "zip")
+                self._send_json(
+                    200,
+                    {"ok": True, "redirect": "/" + urllib.parse.quote(config.deck_file)},
+                )
+                return
+
+            if self.path == "/launch/path":
+                try:
+                    payload = self._read_json()
+                    raw = payload.get("path", "").strip()
+                except Exception as e:
+                    self._send_json(400, {"ok": False, "error": "bad payload: %s" % e})
+                    return
+                if not raw:
+                    self._send_json(400, {"ok": False, "error": "empty path"})
+                    return
+                deck_path = os.path.abspath(os.path.expanduser(raw))
+                if not os.path.exists(deck_path):
+                    self._send_json(400, {"ok": False, "error": "path not found: %s" % deck_path})
+                    return
+                if not os.path.isfile(deck_path):
+                    self._send_json(400, {"ok": False, "error": "not a file: %s" % deck_path})
+                    return
+                if not deck_path.lower().endswith(".html"):
+                    self._send_json(400, {"ok": False, "error": "must be .html: %s" % deck_path})
+                    return
+                try:
+                    switch_to_editor_mode(config, deck_path)
+                except ValueError as e:
+                    self._send_json(500, {"ok": False, "error": str(e)})
+                    return
+                save_recent(deck_path, "path")
+                self._send_json(
+                    200,
+                    {"ok": True, "redirect": "/" + urllib.parse.quote(config.deck_file)},
+                )
+                return
+
+            # ── Everything below requires editor mode ──
+            if config.mode != "editor":
+                self.send_error(404, "launcher mode — load a deck first")
+                return
+
             if self.path == "/upload-image":
                 parts = parse_multipart_upload(self)
                 src, err = save_image_upload(parts, config.docroot)
@@ -2108,9 +2664,17 @@ class Config:
 def main():
     parser = argparse.ArgumentParser(
         description="slide-editor — inline browser editor for HTML slide decks.",
-        epilog="Example: python3 editor.py examples/demo.html --port 8765",
+        epilog=(
+            "Examples:\n"
+            "  python3 editor.py                       # launcher (cover page)\n"
+            "  python3 editor.py examples/demo.html    # direct editor mode"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("deck", help="path to the HTML deck file")
+    parser.add_argument(
+        "deck", nargs="?", default=None,
+        help="path to the HTML deck file (omit to start in launcher mode)",
+    )
     parser.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
     parser.add_argument(
@@ -2141,20 +2705,8 @@ def main():
     )
     args = parser.parse_args()
 
-    deck_path = os.path.abspath(args.deck)
-    if not os.path.exists(deck_path):
-        print("error: deck file not found: %s" % deck_path, file=sys.stderr)
-        sys.exit(1)
-    if not os.path.isfile(deck_path):
-        print("error: not a file: %s" % deck_path, file=sys.stderr)
-        sys.exit(1)
-
     config = Config()
-    config.docroot = os.path.dirname(deck_path)
-    config.deck_path = deck_path
-    config.deck_file = os.path.basename(deck_path)
-    config.backup_dir = os.path.join(config.docroot, ".backups")
-    config.prompts_file = os.path.join(config.docroot, "prompts.json")
+    # Constants regardless of mode
     config.slide_tag = args.slide_tag
     config.slide_class = args.slide_class
     config.slide_key = args.slide_key
@@ -2164,10 +2716,30 @@ def main():
     config.write_lock = threading.Lock()
     config.prompts_lock = threading.Lock()
 
-    os.chdir(config.docroot)
+    if args.deck:
+        deck_path = os.path.abspath(args.deck)
+        if not os.path.exists(deck_path):
+            print("error: deck file not found: %s" % deck_path, file=sys.stderr)
+            sys.exit(1)
+        if not os.path.isfile(deck_path):
+            print("error: not a file: %s" % deck_path, file=sys.stderr)
+            sys.exit(1)
+        switch_to_editor_mode(config, deck_path)
+    else:
+        # Launcher mode: no deck loaded yet. cwd stays as user's launch dir.
+        config.mode = "launcher"
+        config.docroot = None
+        config.deck_path = None
+        config.deck_file = None
+        config.backup_dir = None
+        config.prompts_file = None
+
     Handler = make_handler(config)
     httpd = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
-    url = "http://%s:%d/%s" % (args.host, args.port, urllib.parse.quote(config.deck_file))
+    if config.mode == "editor":
+        url = "http://%s:%d/%s" % (args.host, args.port, urllib.parse.quote(config.deck_file))
+    else:
+        url = "http://%s:%d/" % (args.host, args.port)
 
     if config.ai_enabled:
         chosen = resolve_backend(config.backend)
@@ -2179,11 +2751,16 @@ def main():
         ai_state = "off"
 
     print("slide-editor running")
+    print("  mode:       %s" % config.mode)
     print("  url:        %s" % url)
-    print("  deck:       %s" % config.deck_path)
-    print("  selector:   %s [%s]" % (config.slide_selector, config.slide_key))
-    print("  backups:    %s" % config.backup_dir)
-    print("  prompts:    %s" % config.prompts_file)
+    if config.mode == "editor":
+        print("  deck:       %s" % config.deck_path)
+        print("  selector:   %s [%s]" % (config.slide_selector, config.slide_key))
+        print("  backups:    %s" % config.backup_dir)
+        print("  prompts:    %s" % config.prompts_file)
+    else:
+        print("  workspace:  %s" % WORKSPACE_DIR)
+        print("  recents:    %s" % RECENT_FILE)
     print("  ai-rewrite: %s" % ai_state)
     print("Press Ctrl+C to stop.")
     try:
