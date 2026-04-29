@@ -1846,10 +1846,10 @@ LAUNCHER_HTML = r"""<!doctype html>
   section h2{font-size:14px;font-weight:500;letter-spacing:0.18em;color:var(--gray);text-transform:uppercase;margin-bottom:24px;padding-bottom:12px;border-bottom:1px solid var(--line)}
   section .lead{font-size:14px;color:var(--gray);margin-bottom:16px;line-height:1.7}
   /* Drop zone */
-  .drop{border:1px dashed var(--ink);background:var(--bg-warm);padding:48px 32px;text-align:center;cursor:pointer;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
+  .drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1px dashed var(--ink);background:var(--bg-warm);padding:64px 32px;text-align:center;cursor:pointer;transition:background 280ms cubic-bezier(0.25,0.46,0.45,0.94);min-height:160px}
   .drop:hover,.drop.over{background:var(--ink);color:var(--bg)}
   .drop:hover .drop-hint,.drop.over .drop-hint{color:var(--bg)}
-  .drop strong{display:block;font-size:18px;font-weight:500;margin-bottom:8px;letter-spacing:0.02em}
+  .drop strong{font-size:20px;font-weight:500;letter-spacing:0.02em}
   .drop-hint{font-size:13px;color:var(--gray);transition:color 280ms cubic-bezier(0.25,0.46,0.45,0.94)}
   .drop input[type=file]{display:none}
   /* Path form */
