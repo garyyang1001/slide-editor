@@ -318,7 +318,7 @@ EDITOR_JS_TEMPLATE = r"""
       '  <button class="__bar_home" id="__home_btn__" title="返回首頁（未存檔會提醒）">← 首頁</button>',
       '  <span class="__bar_brand">編輯器</span>',
       '  <span class="__bar_sep">／</span>',
-      '  <span class="__bar_hint">點任何文字直接改　·　標記位置讓 AI 改寫</span>',
+      '  <span class="__bar_hint">點文字直接編輯　·　右鍵刪除元件　·　標記讓 AI 改寫</span>',
       '  <button class="__bar_help" id="__help_btn__" title="使用說明（按 ?）">？</button>',
       '</div>',
       '<div class="__bar_bottom">',
