@@ -1,0 +1,22 @@
+{
+  "name": "slide-editor-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "remotion studio",
+    "render": "remotion render Intro out/intro.mp4 --codec=h264 --concurrency=4",
+    "render-gif": "remotion render Intro out/intro.gif --codec=gif --concurrency=4"
+  },
+  "dependencies": {
+    "@remotion/google-fonts": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@types/react": "^18.3.0",
+    "typescript": "^5.4.0"
+  }
+}

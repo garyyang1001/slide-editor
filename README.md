@@ -8,6 +8,14 @@
 python3 editor.py path/to/deck.html
 ```
 
+## 介紹影片
+
+25 秒介紹影片（用 [Remotion](https://www.remotion.dev/) 寫的，原始碼在 [`video/`](video/)）：
+
+[![slide-editor 介紹影片](assets/intro-poster.png)](assets/intro.mp4)
+
+[▶ 點圖播放 ／ 直接下載 MP4](assets/intro.mp4)
+
 ---
 
 ## 為什麼做這個
