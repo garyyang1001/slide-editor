@@ -258,6 +258,8 @@ EDITOR_JS_TEMPLATE = r"""
       'body.__move_mode__.__dragging,body.__move_mode__.__dragging *{cursor:grabbing !important}',
       'body.__move_mode__ ' + SLIDE_SELECTOR + ' *:hover{outline:1px solid var(--ed-ink) !important;outline-offset:4px}',
       'body.__move_mode__ [contenteditable]{outline:none !important}',
+      'body.__insert_mode__,body.__insert_mode__ *{cursor:crosshair !important}',
+      'body.__insert_mode__ ' + SLIDE_SELECTOR + ':hover{outline:2px solid var(--ed-red) !important;outline-offset:-2px}',
       '#__move_indicator__{position:fixed;bottom:140px;right:24px;z-index:2147483645;background:var(--ed-ink);color:var(--ed-bg);padding:8px 12px;font-family:var(--ed-mono);font-size:11px;letter-spacing:0.05em;display:none;line-height:1.4}',
       '#__move_indicator__.show{display:block}',
 
@@ -267,6 +269,7 @@ EDITOR_JS_TEMPLATE = r"""
       '.__ft_btn:last-child{border-right:0}',
       '.__ft_btn:hover{background:var(--ed-ink);color:var(--ed-bg);opacity:1}',
       '.__ft_minus,.__ft_plus{font-size:18px;line-height:0.7;min-width:36px;text-align:center;font-weight:300}',
+      '.__ft_fmt{font-size:14px;min-width:32px;text-align:center}',
       '.__ft_size{padding:8px 14px;font-size:11px;letter-spacing:0.05em;color:var(--ed-gray);font-family:var(--ed-mono);min-width:56px;text-align:center;border-right:1px solid var(--ed-line);user-select:none}',
       '.__ft_reset{font-size:11px;letter-spacing:0.1em;text-transform:uppercase}',
       '.__ft_select{appearance:none;-webkit-appearance:none;background:transparent;border:0;border-right:1px solid var(--ed-line);padding:8px 26px 8px 14px;font-family:inherit;font-size:12px;color:var(--ed-ink);cursor:pointer;line-height:1;letter-spacing:0;background-image:url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'8\' height=\'5\' viewBox=\'0 0 8 5\'><path d=\'M0 0 L4 5 L8 0 Z\' fill=\'%232D2A26\'/></svg>");background-repeat:no-repeat;background-position:right 10px center}',
@@ -322,6 +325,8 @@ EDITOR_JS_TEMPLATE = r"""
       '  <button class="__btn __btn-ghost" id="__pin_btn__" title="標記要 AI 改寫的位置">標記 prompt</button>',
       '  <button class="__btn __btn-ghost" id="__move_btn__" title="拖曳元件改變位置">移動模式</button>',
       '  <button class="__btn __btn-ghost" id="__img_btn__" title="上傳圖片（也可拖檔到 slide）">新增圖片</button>',
+      '  <button class="__btn __btn-ghost" id="__add_h2_btn__" title="新增標題（H2）">＋ 標題</button>',
+      '  <button class="__btn __btn-ghost" id="__add_p_btn__" title="新增一般文字（P）">＋ 文字</button>',
       '  <button class="__btn __btn-ghost" id="__queue_btn__" title="查看 prompt 佇列">佇列 ／ <span id="__queue_count__">0</span></button>',
       '  <button class="__btn __btn-ink" id="__save_btn__" title="儲存到檔案（⌘S）">存檔</button>',
       '  <span id="__save_status__">就緒</span>',
@@ -492,6 +497,7 @@ EDITOR_JS_TEMPLATE = r"""
       if (e.key === 'Escape') {
         if (document.body.classList.contains('__pin_mode__')) exitPinMode();
         if (document.body.classList.contains('__move_mode__')) exitMoveMode();
+        if (document.body.classList.contains('__insert_mode__')) exitInsertMode();
         var hm = document.getElementById('__help_modal__');
         if (hm && hm.classList.contains('show')) closeHelp();
         var homeM = document.getElementById('__home_modal__');
@@ -929,6 +935,9 @@ EDITOR_JS_TEMPLATE = r"""
     fontToolbar.innerHTML = [
       '<select class="__ft_select" id="__ft_family__" title="字體（Google Fonts）">' + buildFontFamilyOptions() + '</select>',
       '<select class="__ft_select" id="__ft_weight__" title="字重">' + buildFontWeightOptions() + '</select>',
+      '<button class="__ft_btn __ft_fmt" id="__ft_bold__" title="粗體（⌘B）" style="font-weight:700">B</button>',
+      '<button class="__ft_btn __ft_fmt" id="__ft_italic__" title="斜體（⌘I）" style="font-style:italic">I</button>',
+      '<button class="__ft_btn __ft_fmt" id="__ft_underline__" title="底線（⌘U）" style="text-decoration:underline">U</button>',
       '<button class="__ft_btn __ft_minus" id="__ft_minus__" title="縮小 2px（Alt+↓）">−</button>',
       '<span class="__ft_size" id="__ft_size__">16px</span>',
       '<button class="__ft_btn __ft_plus" id="__ft_plus__" title="放大 2px（Alt+↑）">+</button>',
@@ -942,6 +951,9 @@ EDITOR_JS_TEMPLATE = r"""
     var ftSize = document.getElementById('__ft_size__');
     var ftFamily = document.getElementById('__ft_family__');
     var ftWeight = document.getElementById('__ft_weight__');
+    var ftBold = document.getElementById('__ft_bold__');
+    var ftItalic = document.getElementById('__ft_italic__');
+    var ftUnderline = document.getElementById('__ft_underline__');
 
     var focusedEditable = null;
 
@@ -1085,6 +1097,29 @@ EDITOR_JS_TEMPLATE = r"""
     ftWeight.addEventListener('change', function (e) {
       applyFontWeight(e.target.value);
     });
+
+    // B / I / U — apply inline formatting to the current selection inside
+    // the focused contenteditable element.  document.execCommand is the
+    // shortest path; modern browsers still support 'bold' / 'italic' /
+    // 'underline' even though the API is officially deprecated.
+    function applyFormat(cmd) {
+      if (!focusedEditable) return;
+      // Make sure the selection is inside our editable; otherwise refocus
+      var sel = window.getSelection();
+      if (!sel.rangeCount || !focusedEditable.contains(sel.anchorNode)) {
+        focusedEditable.focus();
+      }
+      try { document.execCommand(cmd, false, null); } catch (e) {}
+      var slide = findSlide(focusedEditable);
+      var key = slide ? getSlideKey(slide) : '';
+      if (key) {
+        dirty.add(key);
+        setStatus(dirty.size + ' 張未存', 'dirty');
+      }
+    }
+    ftBold.addEventListener('click', function () { applyFormat('bold'); });
+    ftItalic.addEventListener('click', function () { applyFormat('italic'); });
+    ftUnderline.addEventListener('click', function () { applyFormat('underline'); });
 
     window.addEventListener('keydown', function (e) {
       if (!focusedEditable) return;
@@ -1413,6 +1448,104 @@ EDITOR_JS_TEMPLATE = r"""
     window.addEventListener('resize', handleReposition);
 
     // ──────────────────────────────────────────────────────────
+    // INSERT NEW ELEMENT — H2 title or P paragraph
+    // Click "+ 標題" or "+ 文字" → cursor turns crosshair → click on
+    // any slide to drop a new element at that point.  Element gets
+    // a placeholder, is auto-focused, and its text pre-selected so
+    // the next keystroke replaces the placeholder.
+    // ──────────────────────────────────────────────────────────
+    var addH2Btn = document.getElementById('__add_h2_btn__');
+    var addPBtn = document.getElementById('__add_p_btn__');
+    var pendingInsert = null;
+
+    function enterInsertMode(type) {
+      // Clear other modes if they're on
+      if (document.body.classList.contains('__pin_mode__')) exitPinMode();
+      if (document.body.classList.contains('__move_mode__')) exitMoveMode();
+      // Disable contenteditable so click selects the slide, not a caret
+      document.querySelectorAll('[contenteditable="true"]').forEach(function (el) {
+        el.dataset.__wasInsertEditable__ = '1';
+        el.contentEditable = 'false';
+      });
+      pendingInsert = { type: type };
+      document.body.classList.add('__insert_mode__');
+      flashUploadStatus(
+        '點 slide 上想放置的位置　·　Esc 取消',
+        999999
+      );
+    }
+
+    function exitInsertMode() {
+      document.querySelectorAll('[data-__was-insert-editable__="1"]').forEach(function (el) {
+        el.contentEditable = 'true';
+        delete el.dataset.__wasInsertEditable__;
+      });
+      document.body.classList.remove('__insert_mode__');
+      pendingInsert = null;
+      uploadStatus.classList.remove('show');
+    }
+
+    addH2Btn.addEventListener('click', function () {
+      if (pendingInsert && pendingInsert.type === 'h2') exitInsertMode();
+      else enterInsertMode('h2');
+    });
+    addPBtn.addEventListener('click', function () {
+      if (pendingInsert && pendingInsert.type === 'p') exitInsertMode();
+      else enterInsertMode('p');
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!pendingInsert) return;
+      if (e.target.closest('#__editor_bar__') ||
+          e.target.closest('#__handle_layer__') ||
+          e.target.closest('#__prompt_modal__') ||
+          e.target.closest('#__home_modal__') ||
+          e.target.closest('#__help_modal__') ||
+          e.target.closest('#__context_menu__')) return;
+      var slide = findSlide(e.target);
+      if (!slide) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      var rect = slide.getBoundingClientRect();
+      var scale = getStageScale(slide) || 1;
+      var localX = (e.clientX - rect.left) / scale;
+      var localY = (e.clientY - rect.top) / scale;
+
+      var type = pendingInsert.type;
+      var el = document.createElement(type);
+      el.contentEditable = 'true';
+      el.spellcheck = false;
+      el.textContent = type === 'h2' ? '點此編輯標題' : '點此編輯一般文字';
+      el.style.cssText = [
+        'position:absolute',
+        'left:' + Math.round(localX) + 'px',
+        'top:' + Math.round(localY) + 'px',
+        'margin:0',
+        'min-width:120px',
+        type === 'p' ? 'max-width:600px' : ''
+      ].filter(Boolean).join(';');
+      slide.appendChild(el);
+
+      var key = getSlideKey(slide);
+      if (key) {
+        dirty.add(key);
+        setStatus(dirty.size + ' 張未存', 'dirty');
+      }
+      exitInsertMode();
+
+      // Focus + select all so the user can immediately type to replace
+      setTimeout(function () {
+        el.focus();
+        var range = document.createRange();
+        range.selectNodeContents(el);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }, 30);
+    }, true);
+
+    // ──────────────────────────────────────────────────────────
     // PENDING-PROMPT MARKERS
     // ──────────────────────────────────────────────────────────
     var dotLayer = document.createElement('div');
@@ -1523,13 +1656,19 @@ EDITOR_JS_TEMPLATE = r"""
       '    <p>4.　位移用 transform: translate 寫在 inline style，原本版面不會崩。</p>',
       '  </div>',
       '  <div class="__help_section">',
-      '    <h4>方式四　改字體 ／ 字重 ／ 大小</h4>',
+      '    <h4>方式四　改字體 ／ 字重 ／ 大小 ／ 粗斜底</h4>',
       '    <p>點任何文字 → 上方浮出小工具列：</p>',
       '    <p class="__indent"><b>字體下拉</b>　Google Fonts 13 款（Noto Sans/Serif TC、Inter、Plus Jakarta、IBM Plex、Manrope、Crimson Pro、Lora、JetBrains Mono…），選了動態載入</p>',
       '    <p class="__indent"><b>字重下拉</b>　300 ／ 400 ／ 500 ／ 700</p>',
+      '    <p class="__indent"><b>B ／ I ／ U</b>　粗體 ／ 斜體 ／ 底線（先選取一段文字再按，或用 ⌘B ⌘I ⌘U）</p>',
       '    <p class="__indent"><b>− ／ +</b>　字級減／加 2px（也可 Alt+↑ ／ Alt+↓）</p>',
       '    <p class="__indent"><b>RESET</b>　還原所有 font 設定（family、weight、size 一起清掉）</p>',
       '    <p>所有改動寫進元素的 inline style，跟著 ⌘S 一起存檔。</p>',
+      '  </div>',
+      '  <div class="__help_section">',
+      '    <h4>方式六　新增元件</h4>',
+      '    <p>工具列「<b>＋ 標題</b>」或「<b>＋ 文字</b>」→ 游標變準心 → 點 slide 上想放的位置 → 元件落地。</p>',
+      '    <p>新元件的預設文字會被全選，直接打字就替換。元件有 contenteditable，可以用 B / I / U 加粗斜底、字體大小都能改、移動模式可以拖、右鍵可刪。</p>',
       '  </div>',
       '  <div class="__help_section">',
       '    <h4>方式五　插入與調整圖片</h4>',
