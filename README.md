@@ -40,7 +40,7 @@ python3 editor.py path/to/deck.html
 | **改字級** | 點任何文字 → 上方浮出小工具列：`−` 縮小 / 目前大小 / `+` 放大 / `RESET` 還原。或鍵盤 `Alt+↑` / `Alt+↓`。 |
 | **AI 改寫（即時）** | 標記某段文字 → 輸入指令（「改更口語」「縮成兩句」）→ 10–18 秒後跳出「改前 ／ 改後」對照 → 接受或丟棄。 |
 | **AI 改寫（佇列）** | 同樣標記但選「加入佇列」→ 累積一批 prompt → 回 Claude Code 對話框說「跑 queue」一次處理。 |
-| **插入圖片** | 把圖片檔拖進瀏覽器 → 自動上傳到 deck 旁的 `images/` → 落在拖放位置。也可從工具列「新增圖片」用檔案選擇器。 |
+| **插入圖片** | 拖檔進瀏覽器 → 落在拖放點。或工具列「新增圖片」→ 選檔 → 自動放在當前看的那張 slide 中央。 |
 | **縮放圖片** | 點圖片 → 四個角出現方塊 handle → 拖角縮放（鎖定長寬比）。`Backspace` 刪除選中的圖片。 |
 | **存檔** | `⌘S` 寫回原始 HTML。每次存檔前自動備份到 `.backups/`，保留 20 份。 |
 
@@ -168,12 +168,19 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 ### 五　插入與縮放圖片
 
-兩種上傳方式：
+兩種上傳路徑，看你要不要當下指定位置：
 
-- **拖檔**　把圖片從 Finder 拖進瀏覽器，落在哪張 slide 圖就放哪裡（拖過 slide 時會出現紅色虛線提示）。
-- **按鈕**　工具列「**新增圖片**」→ 檔案選擇器 → 落在當前可見 slide 的中央。
+- **拖檔**　把圖片從 Finder 拖進瀏覽器，落在哪張 slide 圖就放哪裡（拖過 slide 時會出現紅色虛線提示）。**用這個指定確切位置**。
+- **按鈕**　工具列「**新增圖片**」→ 選檔 → 圖片自動放到**當前看的那張 slide 中央**，並自動選中（馬上看到縮放 handle）。**不用切換頁面、不用第二次點擊**。
 
-圖片會儲存到 deck 旁的 `images/` 資料夾，HTML 用相對路徑引用（`<img src="images/..." />`）。檔名加時間戳避免衝突。**支援格式**：jpg / png / webp / gif / svg，**單檔上限** 10 MB。
+按鈕流程的「當前 slide」偵測有四層保險：
+
+1. `[data-deck-active]` 屬性（`<deck-stage>` 跟類似系統會標）
+2. 當前唯一可見的 slide（檢查 `display` / `opacity` / `visibility` / 渲染矩形）
+3. 視窗中央最接近的 slide（給捲動式 deck 用）
+4. 第一張（最後保險）
+
+圖片儲存到 deck 旁的 `images/` 資料夾，HTML 用相對路徑引用（`<img src="images/..." />`）。檔名加毫秒時間戳避免衝突。**支援格式**：jpg / png / webp / gif / svg，**單檔上限** 10 MB。
 
 插入後：
 
@@ -206,13 +213,14 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 ## 架構
 
-`editor.py` 是一支大約 900 行的 Python 腳本，包了標準庫的 `http.server`。做三件事：
+`editor.py` 是一支約 1900 行的 Python 腳本，包了標準庫的 `http.server`。做四件事：
 
 1. **服務 deck 檔**　收到 GET 請求時把編輯器 JS bundle（toolbar、modal、所有事件處理）注入到 `</body>` 前面才回傳。原始檔不動。
-2. **存 slide 級的編輯**　`POST /save-slide`：讀原檔、regex 找對應 slide、換 inner HTML、寫回。寫之前自動備份。
-3. **管 prompt + 跑 AI**　`/queue-prompt`、`/delete-prompt`、`/clear-prompts`、`/list-prompts` 操作 `prompts.json`。`/ai-edit` shells out 到 claude 或 codex CLI 做即時改寫。
+2. **存 slide 級的編輯**　`POST /save-slide`：讀原檔、regex 找對應 slide、換 inner HTML、寫回。寫之前自動備份到 `.backups/`。
+3. **管 prompt + 跑 AI**　`/queue-prompt`、`/delete-prompt`、`/clear-prompts`、`/list-prompts` 操作 `prompts.json`。`/ai-edit` shells out 到 `claude` 或 `codex` CLI 做即時改寫，依 `--backend` 旗標選擇。
+4. **處理圖片上傳**　`POST /upload-image` 自帶 multipart 解析器（不依賴已被 deprecate 的 `cgi` module），驗證副檔名、MIME、大小、檔名 sanitize、`realpath` 防穿越，存到 `<docroot>/images/`。
 
-注入的 JS 是 Python 檔裡的字串模板。沒有 build step、沒有 npm。`python3 editor.py deck.html` 一行就跑。
+注入的 JS 是 Python 檔裡的字串模板。沒有 build step、沒有 npm、沒有外部 Python 套件。`python3 editor.py deck.html` 一行就跑。
 
 ---
 
