@@ -1,0 +1,27 @@
+# Editor runtime artifacts
+.backups/
+prompts.json
+prompts.json.tmp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Server logs
+*.log

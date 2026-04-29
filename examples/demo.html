@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slide-editor — demo deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:     #2D2A26;
+    --bg:      #F5F5F0;
+    --gray:    #8C8C88;
+    --line:    #E0E0D8;
+    --red:     #C84630;
+    --bg-warm: #FAFAF5;
+    --font:    "Noto Sans TC", "PingFang TC", "Heiti TC", -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono:    ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  html, body {
+    margin: 0;
+    padding: 32px 0;
+    background: var(--ink);
+    font-family: var(--font);
+    font-weight: 300;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  section.slide {
+    width: 1280px;
+    min-height: 720px;
+    margin: 24px auto;
+    background: var(--bg);
+    padding: 80px 120px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+  }
+
+  h1 { font-size: 56px; line-height: 1.2; letter-spacing: 0.02em; font-weight: 300; margin: 0 0 32px; }
+  h2 { font-size: 36px; line-height: 1.3; letter-spacing: 0.02em; font-weight: 300; margin: 0 0 24px; }
+  h3 { font-size: 22px; line-height: 1.4; font-weight: 500; margin: 0 0 12px; }
+  p  { font-size: 17px; line-height: 1.7; margin: 0 0 12px; max-width: 860px; }
+  ol, ul { font-size: 17px; line-height: 1.9; margin: 0; padding-left: 24px; }
+
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gray);
+    margin-bottom: 24px;
+  }
+  .red       { color: var(--red); }
+  .gray      { color: var(--gray); }
+  .lead      { font-size: 19px; line-height: 1.7; max-width: 760px; }
+  .small     { font-size: 13px; line-height: 1.6; color: var(--gray); }
+  .rule      { border: 0; border-top: 1px solid var(--ink); margin: 24px 0 32px; }
+  .rule-hair { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+
+  .footer {
+    position: absolute;
+    bottom: 32px;
+    left: 120px;
+    right: 120px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--gray);
+    text-transform: uppercase;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+
+  .card {
+    border: 1px solid var(--line);
+    background: var(--bg-warm);
+    padding: 24px 28px;
+  }
+  .card .num {
+    font-family: var(--mono);
+    color: var(--red);
+    font-size: 12px;
+    letter-spacing: 0.15em;
+    margin-bottom: 12px;
+  }
+
+  .kbd {
+    display: inline-block;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    background: var(--bg-warm);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<section class="slide" data-label="01 cover">
+  <div class="eyebrow">slide-editor / demo</div>
+  <h1>Click anything.<br>Type. Drag. Save.</h1>
+  <hr class="rule">
+  <p class="lead">
+    This deck is intentionally simple so you can see how the editor works.
+    Every word here is editable in place. Try clicking this paragraph and changing it.
+  </p>
+  <p class="small" style="margin-top: 32px;">
+    Press <span class="kbd">?</span> at any time to open the help overlay.
+  </p>
+  <div class="footer">
+    <span>slide-editor · demo</span>
+    <span>01 ／ 04</span>
+  </div>
+</section>
+
+<section class="slide" data-label="02 features">
+  <div class="eyebrow">What it does</div>
+  <h2>Four ways to edit a slide.</h2>
+  <hr class="rule">
+  <div class="grid-2">
+    <div class="card">
+      <div class="num">01 · DIRECT</div>
+      <h3>Type to edit text</h3>
+      <p>Hover any text. Hairline outline appears. Click. Type. No mode-switching.</p>
+    </div>
+    <div class="card">
+      <div class="num">02 · MOVE</div>
+      <h3>Drag to reposition</h3>
+      <p>Toggle move mode. Drag any element. Position is stored as a transform on inline style. Double-click to reset.</p>
+    </div>
+    <div class="card">
+      <div class="num">03 · RESIZE</div>
+      <h3>Adjust font size</h3>
+      <p>Focus a text element. The floating toolbar above it lets you bump size up or down 2px at a time.</p>
+    </div>
+    <div class="card">
+      <div class="num">04 · REWRITE</div>
+      <h3>AI rewrite a block</h3>
+      <p>Mark a position. Type a prompt. Run instantly via Claude Code, or queue and batch later.</p>
+    </div>
+  </div>
+  <div class="footer">
+    <span>slide-editor · demo</span>
+    <span>02 ／ 04</span>
+  </div>
+</section>
+
+<section class="slide" data-label="03 workflow">
+  <div class="eyebrow">A typical edit pass</div>
+  <h2>The messy middle of slide work.</h2>
+  <hr class="rule">
+  <p class="lead">
+    The editor is built for the moment when you have a draft, the slides are roughly right,
+    and you want to iterate on copy and layout fast — without bouncing to a separate tool.
+  </p>
+  <ol style="margin-top: 32px;">
+    <li>Click a paragraph. Tighten the wording yourself.</li>
+    <li>Stuck on phrasing? Mark it, type "make this punchier," click <span class="red">立即重寫</span>.</li>
+    <li>Heading too small? Focus it, hit <span class="kbd">Alt+↑</span> until it feels right.</li>
+    <li>Card alignment off? Switch to move mode, nudge it 8 pixels left.</li>
+    <li>Press <span class="kbd">⌘S</span>. Done. A backup of the file went to <span class="kbd">.backups/</span>.</li>
+  </ol>
+  <div class="footer">
+    <span>slide-editor · demo</span>
+    <span>03 ／ 04</span>
+  </div>
+</section>
+
+<section class="slide" data-label="04 about">
+  <div class="eyebrow">About</div>
+  <h2>好事發生數位 ／ Ohya Digital</h2>
+  <hr class="rule">
+  <p class="lead">
+    A Taipei-based digital strategy consultancy. We help professional services firms —
+    consultancies, healthcare systems, B2B exporters — turn their expertise into
+    discoverable, readable, sales-ready online assets.
+  </p>
+  <hr class="rule-hair" style="max-width: 760px;">
+  <p style="max-width: 760px;">
+    This editor exists because we make a lot of HTML slide decks for client engagements,
+    and we wanted to iterate on copy quickly with AI assistance while keeping every change
+    traceable in a real source file. So we built one and put it on GitHub.
+  </p>
+  <p class="small" style="margin-top: 40px;">
+    gary@ohya.co　·　LINE：Skimmr
+  </p>
+  <div class="footer">
+    <span>slide-editor · demo</span>
+    <span>04 ／ 04</span>
+  </div>
+</section>
+
+</body>
+</html>
