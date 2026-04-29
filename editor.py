@@ -924,29 +924,67 @@ EDITOR_JS_TEMPLATE = r"""
       return img;
     }
 
-    // ─── Toolbar button → file picker ───
+    // ─── Identify the slide the user is currently looking at ───
+    // Strategy chain:
+    //   1. deck-stage style: an element with [data-deck-active] attribute
+    //   2. Visible slide: not display:none, not opacity:0, has nonzero rect
+    //   3. Closest to viewport center (for scrolling decks)
+    //   4. First slide as last resort
+    function getActiveSlide() {
+      var marked = document.querySelector(SLIDE_SELECTOR + '[data-deck-active]');
+      if (marked) return marked;
+
+      var allSlides = document.querySelectorAll(SLIDE_SELECTOR);
+      if (!allSlides.length) return null;
+
+      // Visibility-based detection (works for stacked decks even without the marker attr)
+      var visible = [];
+      allSlides.forEach(function (s) {
+        var cs = getComputedStyle(s);
+        if (cs.display === 'none') return;
+        if (parseFloat(cs.opacity || '1') < 0.05) return;
+        if (cs.visibility === 'hidden') return;
+        var rect = s.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+        if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+        visible.push({ slide: s, rect: rect });
+      });
+      if (visible.length === 1) return visible[0].slide;
+
+      // Multiple visible (scrolling deck) — pick the one closest to viewport center
+      var midY = window.innerHeight / 2;
+      var best = null, bestDist = Infinity;
+      visible.forEach(function (v) {
+        var sMid = (v.rect.top + v.rect.bottom) / 2;
+        var d = Math.abs(sMid - midY);
+        if (d < bestDist) { bestDist = d; best = v.slide; }
+      });
+      return best || allSlides[0];
+    }
+
+    // ─── Toolbar button → file picker → upload → auto-insert at active slide ───
     imgBtn.addEventListener('click', function () { imgInput.click(); });
     imgInput.addEventListener('change', async function (e) {
       var file = e.target.files && e.target.files[0];
-      if (!file) return;
-      // Pick the slide closest to the viewport center.
-      var allSlides = document.querySelectorAll(SLIDE_SELECTOR);
-      var target = null;
-      var bestDist = Infinity;
-      var midY = window.innerHeight / 2;
-      allSlides.forEach(function (s) {
-        var rect = s.getBoundingClientRect();
-        if (rect.bottom < 0 || rect.top > window.innerHeight) return;
-        var sMid = (rect.top + rect.bottom) / 2;
-        var d = Math.abs(sMid - midY);
-        if (d < bestDist) { bestDist = d; target = s; }
-      });
-      if (!target) target = allSlides[0];
-      if (!target) { alert('找不到 slide'); return; }
-      var src = await uploadImageFile(file);
-      if (!src) { imgInput.value = ''; return; }
-      insertImageAt(target, src, null, null, 320);
       imgInput.value = '';
+      if (!file) return;
+      var slide = getActiveSlide();
+      if (!slide) {
+        alert('找不到當前 slide');
+        return;
+      }
+      var src = await uploadImageFile(file);
+      if (!src) return;
+      // Auto-place at the center of the active slide. User can drag in move mode.
+      var img = insertImageAt(slide, src, null, null, 320);
+      // Auto-select so resize handles appear, plus give user a hint about positioning.
+      setTimeout(function () {
+        if (selectedImage) selectedImage.classList.remove('__selected');
+        selectedImage = img;
+        img.classList.add('__selected');
+        showHandles(img);
+        flashUploadStatus('已插入　·　拖角縮放　·　移動模式可拖曳位置', 3500);
+      }, 100);
     });
 
     // ─── Drag-drop onto slides ───
@@ -1234,8 +1272,8 @@ EDITOR_JS_TEMPLATE = r"""
       '  <div class="__help_section">',
       '    <h4>方式五　插入與調整圖片</h4>',
       '    <p>兩種方法上傳：</p>',
-      '    <p class="__indent">·　把圖片檔從 Finder 拖進瀏覽器，落在哪張 slide 圖就放哪裡</p>',
-      '    <p class="__indent">·　點工具列「新增圖片」，從檔案選擇器挑一張，會落在當前可見 slide 的中央</p>',
+      '    <p class="__indent">·　<b>拖檔</b>　把圖片從 Finder 拖進瀏覽器，落在哪張 slide 上，圖就放在拖放點</p>',
+      '    <p class="__indent">·　<b>按鈕</b>　點工具列「新增圖片」→ 選檔 → 自動放在當前看的那張 slide 中央，並自動選中（出現縮放 handle）</p>',
       '    <p>圖片會存進 deck 旁邊的 <span class="__help_kbd">images/</span> 資料夾，HTML 用相對路徑引用。</p>',
       '    <p>插入後可以：</p>',
       '    <p class="__indent">·　<b>移動</b>　開移動模式拖曳，跟其他元件一樣</p>',
