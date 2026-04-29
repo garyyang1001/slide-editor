@@ -262,6 +262,21 @@ EDITOR_JS_TEMPLATE = r"""
       '.__ft_minus,.__ft_plus{font-size:18px;line-height:0.7;min-width:36px;text-align:center;font-weight:300}',
       '.__ft_size{padding:8px 14px;font-size:11px;letter-spacing:0.05em;color:var(--ed-gray);font-family:var(--ed-mono);min-width:56px;text-align:center;border-right:1px solid var(--ed-line);user-select:none}',
       '.__ft_reset{font-size:11px;letter-spacing:0.1em;text-transform:uppercase}',
+
+      // Images — drop target highlight, hover affordance, resize handles
+      'img.__editor_image__{user-select:none;-webkit-user-drag:none;max-width:none}',
+      'img.__editor_image__:hover{outline:1px solid var(--ed-line);outline-offset:2px}',
+      'img.__editor_image__.__selected{outline:1px solid var(--ed-ink);outline-offset:2px}',
+      SLIDE_SELECTOR + '.__drop_target__{outline:2px solid var(--ed-red);outline-offset:-2px;background:rgba(200,70,48,0.04)}',
+      '#__handle_layer__{position:absolute;top:0;left:0;pointer-events:none;z-index:99997}',
+      '.__resize_handle__{position:absolute;width:12px;height:12px;background:var(--ed-bg);border:1px solid var(--ed-ink);pointer-events:auto;z-index:99998;transition:background 280ms var(--ed-ease)}',
+      '.__resize_handle__:hover{background:var(--ed-ink)}',
+      '.__resize_handle__.__nw{cursor:nwse-resize}',
+      '.__resize_handle__.__ne{cursor:nesw-resize}',
+      '.__resize_handle__.__sw{cursor:nesw-resize}',
+      '.__resize_handle__.__se{cursor:nwse-resize}',
+      '#__upload_status__{position:fixed;top:24px;right:24px;z-index:2147483645;background:var(--ed-ink);color:var(--ed-bg);padding:8px 16px;font:400 11px/1.5 var(--ed-font);letter-spacing:0.1em;text-transform:uppercase;display:none}',
+      '#__upload_status__.show{display:block}',
       ''
     ].join('\n');
     document.head.appendChild(style);
@@ -281,6 +296,7 @@ EDITOR_JS_TEMPLATE = r"""
       '<div class="__bar_bottom">',
       '  <button class="__btn __btn-ghost" id="__pin_btn__" title="標記要 AI 改寫的位置">標記 prompt</button>',
       '  <button class="__btn __btn-ghost" id="__move_btn__" title="拖曳元件改變位置">移動模式</button>',
+      '  <button class="__btn __btn-ghost" id="__img_btn__" title="上傳圖片（也可拖檔到 slide）">新增圖片</button>',
       '  <button class="__btn __btn-ghost" id="__queue_btn__" title="查看 prompt 佇列">佇列 ／ <span id="__queue_count__">0</span></button>',
       '  <button class="__btn __btn-ink" id="__save_btn__" title="儲存到檔案（⌘S）">存檔</button>',
       '  <span id="__save_status__">就緒</span>',
@@ -824,6 +840,282 @@ EDITOR_JS_TEMPLATE = r"""
     window.addEventListener('resize', fontTbReposition);
 
     // ──────────────────────────────────────────────────────────
+    // IMAGE UPLOAD & MANIPULATION
+    // - drag-drop file onto slide → uploads, inserts at drop point
+    // - toolbar "新增圖片" button → file picker, inserts at slide center
+    // - click image → 4 corner resize handles, drag to scale (locked aspect)
+    // - Backspace / Delete with image selected → remove
+    // - move mode still applies (transform:translate adds on top)
+    // ──────────────────────────────────────────────────────────
+    var imgBtn = document.getElementById('__img_btn__');
+    var imgInput = document.createElement('input');
+    imgInput.type = 'file';
+    imgInput.accept = 'image/jpeg,image/png,image/webp,image/gif,image/svg+xml';
+    imgInput.style.display = 'none';
+    document.body.appendChild(imgInput);
+
+    var uploadStatus = document.createElement('div');
+    uploadStatus.id = '__upload_status__';
+    document.body.appendChild(uploadStatus);
+    function flashUploadStatus(text, ms) {
+      uploadStatus.textContent = text;
+      uploadStatus.classList.add('show');
+      clearTimeout(uploadStatus.__t);
+      uploadStatus.__t = setTimeout(function () {
+        uploadStatus.classList.remove('show');
+      }, ms || 2400);
+    }
+
+    async function uploadImageFile(file) {
+      if (!file) return null;
+      if (!/^image\//.test(file.type)) {
+        alert('只能上傳圖片檔。');
+        return null;
+      }
+      var fd = new FormData();
+      fd.append('image', file);
+      flashUploadStatus('上傳中…', 60000);
+      try {
+        var r = await fetch('/upload-image', { method: 'POST', body: fd });
+        var data = await r.json();
+        if (!data.ok) {
+          flashUploadStatus('上傳失敗', 2000);
+          alert('上傳失敗：' + (data.error || '未知錯誤'));
+          return null;
+        }
+        flashUploadStatus('上傳完成', 1500);
+        return data.src;
+      } catch (err) {
+        flashUploadStatus('上傳失敗', 2000);
+        alert('上傳失敗：' + err);
+        return null;
+      }
+    }
+
+    function insertImageAt(slide, src, slideX, slideY, defaultWidth) {
+      // slideX/Y are in slide-local coords (pre-scale).  null means center.
+      var img = document.createElement('img');
+      img.src = src;
+      img.className = '__editor_image__';
+      img.draggable = false;
+      img.alt = '';
+      var w = defaultWidth || 320;
+      var styleParts = [
+        'position:absolute',
+        'width:' + w + 'px',
+        'height:auto',
+      ];
+      if (slideX === null || slideY === null) {
+        styleParts.push('left:50%');
+        styleParts.push('top:50%');
+        styleParts.push('transform:translate(-50%,-50%)');
+      } else {
+        // Place so that drop point is image center
+        styleParts.push('left:' + Math.round(slideX - w / 2) + 'px');
+        styleParts.push('top:' + Math.round(slideY - w / 3) + 'px');
+      }
+      img.setAttribute('style', styleParts.join(';'));
+      slide.appendChild(img);
+      var key = getSlideKey(slide);
+      if (key) {
+        dirty.add(key);
+        setStatus(dirty.size + ' 張未存', 'dirty');
+      }
+      return img;
+    }
+
+    // ─── Toolbar button → file picker ───
+    imgBtn.addEventListener('click', function () { imgInput.click(); });
+    imgInput.addEventListener('change', async function (e) {
+      var file = e.target.files && e.target.files[0];
+      if (!file) return;
+      // Pick the slide closest to the viewport center.
+      var allSlides = document.querySelectorAll(SLIDE_SELECTOR);
+      var target = null;
+      var bestDist = Infinity;
+      var midY = window.innerHeight / 2;
+      allSlides.forEach(function (s) {
+        var rect = s.getBoundingClientRect();
+        if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+        var sMid = (rect.top + rect.bottom) / 2;
+        var d = Math.abs(sMid - midY);
+        if (d < bestDist) { bestDist = d; target = s; }
+      });
+      if (!target) target = allSlides[0];
+      if (!target) { alert('找不到 slide'); return; }
+      var src = await uploadImageFile(file);
+      if (!src) { imgInput.value = ''; return; }
+      insertImageAt(target, src, null, null, 320);
+      imgInput.value = '';
+    });
+
+    // ─── Drag-drop onto slides ───
+    var dragHoverSlide = null;
+    document.addEventListener('dragover', function (e) {
+      if (!e.dataTransfer) return;
+      var hasFile = false;
+      if (e.dataTransfer.types) {
+        for (var i = 0; i < e.dataTransfer.types.length; i++) {
+          if (e.dataTransfer.types[i] === 'Files') { hasFile = true; break; }
+        }
+      }
+      if (!hasFile) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      var slide = findSlide(e.target);
+      if (slide !== dragHoverSlide) {
+        if (dragHoverSlide) dragHoverSlide.classList.remove('__drop_target__');
+        dragHoverSlide = slide;
+        if (dragHoverSlide) dragHoverSlide.classList.add('__drop_target__');
+      }
+    });
+    document.addEventListener('dragleave', function (e) {
+      if (e.relatedTarget === null) {
+        if (dragHoverSlide) dragHoverSlide.classList.remove('__drop_target__');
+        dragHoverSlide = null;
+      }
+    });
+    document.addEventListener('drop', async function (e) {
+      if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+      var slide = findSlide(e.target);
+      if (!slide) return;
+      e.preventDefault();
+      if (dragHoverSlide) dragHoverSlide.classList.remove('__drop_target__');
+      dragHoverSlide = null;
+
+      var rect = slide.getBoundingClientRect();
+      var scale = getStageScale(slide) || 1;
+      var localX = (e.clientX - rect.left) / scale;
+      var localY = (e.clientY - rect.top) / scale;
+
+      var file = e.dataTransfer.files[0];
+      var src = await uploadImageFile(file);
+      if (!src) return;
+      insertImageAt(slide, src, localX, localY, 320);
+    });
+
+    // ─── Selection + resize handles ───
+    var handleLayer = document.createElement('div');
+    handleLayer.id = '__handle_layer__';
+    document.body.appendChild(handleLayer);
+
+    var selectedImage = null;
+
+    function clearSelection() {
+      if (selectedImage) selectedImage.classList.remove('__selected');
+      selectedImage = null;
+      handleLayer.innerHTML = '';
+    }
+
+    function showHandles(img) {
+      handleLayer.innerHTML = '';
+      var rect = img.getBoundingClientRect();
+      var corners = [
+        { name: 'nw', x: rect.left, y: rect.top },
+        { name: 'ne', x: rect.right, y: rect.top },
+        { name: 'sw', x: rect.left, y: rect.bottom },
+        { name: 'se', x: rect.right, y: rect.bottom },
+      ];
+      corners.forEach(function (c) {
+        var h = document.createElement('div');
+        h.className = '__resize_handle__ __' + c.name;
+        h.dataset.corner = c.name;
+        h.style.left = (c.x + window.scrollX - 6) + 'px';
+        h.style.top = (c.y + window.scrollY - 6) + 'px';
+        handleLayer.appendChild(h);
+      });
+    }
+
+    document.addEventListener('mousedown', function (e) {
+      // Skip if pin or move mode is active — those have their own handlers.
+      if (document.body.classList.contains('__pin_mode__') ||
+          document.body.classList.contains('__move_mode__')) return;
+      if (e.target.classList && e.target.classList.contains('__resize_handle__')) return;
+
+      if (e.target.tagName === 'IMG' &&
+          e.target.classList.contains('__editor_image__') &&
+          findSlide(e.target)) {
+        if (selectedImage !== e.target) {
+          if (selectedImage) selectedImage.classList.remove('__selected');
+          selectedImage = e.target;
+          selectedImage.classList.add('__selected');
+        }
+        showHandles(selectedImage);
+      } else if (selectedImage && !e.target.closest('#__handle_layer__') && !e.target.closest('#__editor_bar__')) {
+        clearSelection();
+      }
+    }, true);
+
+    // Drag corner → resize
+    var resizeState = null;
+    handleLayer.addEventListener('mousedown', function (e) {
+      if (!e.target.classList.contains('__resize_handle__')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!selectedImage) return;
+      var slide = findSlide(selectedImage);
+      var scale = getStageScale(slide) || 1;
+      resizeState = {
+        img: selectedImage,
+        slide: slide,
+        corner: e.target.dataset.corner,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseWidth: selectedImage.offsetWidth,
+        baseHeight: selectedImage.offsetHeight,
+        aspect: selectedImage.offsetWidth / Math.max(1, selectedImage.offsetHeight),
+        scale: scale,
+      };
+      document.body.style.cursor = (resizeState.corner === 'ne' || resizeState.corner === 'sw') ? 'nesw-resize' : 'nwse-resize';
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!resizeState) return;
+      var dx = (e.clientX - resizeState.startX) / resizeState.scale;
+      var corner = resizeState.corner;
+      var newWidth;
+      if (corner === 'ne' || corner === 'se') newWidth = resizeState.baseWidth + dx;
+      else newWidth = resizeState.baseWidth - dx;
+      newWidth = Math.max(20, Math.min(4000, newWidth));
+      var newHeight = newWidth / resizeState.aspect;
+      resizeState.img.style.width = Math.round(newWidth) + 'px';
+      resizeState.img.style.height = Math.round(newHeight) + 'px';
+      showHandles(resizeState.img);
+    });
+    document.addEventListener('mouseup', function () {
+      if (!resizeState) return;
+      document.body.style.cursor = '';
+      var key = getSlideKey(resizeState.slide);
+      if (key) {
+        dirty.add(key);
+        setStatus(dirty.size + ' 張未存', 'dirty');
+      }
+      resizeState = null;
+    });
+
+    // Backspace / Delete deletes the selected image
+    window.addEventListener('keydown', function (e) {
+      if ((e.key === 'Backspace' || e.key === 'Delete') && selectedImage && !isTyping(e.target)) {
+        e.preventDefault();
+        var slide = findSlide(selectedImage);
+        var key = slide ? getSlideKey(slide) : '';
+        selectedImage.remove();
+        clearSelection();
+        if (key) {
+          dirty.add(key);
+          setStatus(dirty.size + ' 張未存', 'dirty');
+        }
+      }
+    });
+
+    // Reposition handles on scroll/resize/edit
+    var handleReposition = function () {
+      if (selectedImage && document.body.contains(selectedImage)) showHandles(selectedImage);
+      else if (selectedImage) clearSelection();
+    };
+    window.addEventListener('scroll', handleReposition, true);
+    window.addEventListener('resize', handleReposition);
+
+    // ──────────────────────────────────────────────────────────
     // PENDING-PROMPT MARKERS
     // ──────────────────────────────────────────────────────────
     var dotLayer = document.createElement('div');
@@ -940,6 +1232,18 @@ EDITOR_JS_TEMPLATE = r"""
       '    <p>大小寫進元素的 inline font-size，跟著 ⌘S 一起存檔。</p>',
       '  </div>',
       '  <div class="__help_section">',
+      '    <h4>方式五　插入與調整圖片</h4>',
+      '    <p>兩種方法上傳：</p>',
+      '    <p class="__indent">·　把圖片檔從 Finder 拖進瀏覽器，落在哪張 slide 圖就放哪裡</p>',
+      '    <p class="__indent">·　點工具列「新增圖片」，從檔案選擇器挑一張，會落在當前可見 slide 的中央</p>',
+      '    <p>圖片會存進 deck 旁邊的 <span class="__help_kbd">images/</span> 資料夾，HTML 用相對路徑引用。</p>',
+      '    <p>插入後可以：</p>',
+      '    <p class="__indent">·　<b>移動</b>　開移動模式拖曳，跟其他元件一樣</p>',
+      '    <p class="__indent">·　<b>縮放</b>　點圖片 → 四個角出現方塊 handle → 拖角縮放（鎖定長寬比）</p>',
+      '    <p class="__indent">·　<b>刪除</b>　選中圖片按 <span class="__help_kbd">Backspace</span> 或 <span class="__help_kbd">Delete</span></p>',
+      '    <p>支援格式：jpg / png / webp / gif / svg，單檔上限 10 MB。</p>',
+      '  </div>',
+      '  <div class="__help_section">',
       '    <h4>儲存</h4>',
       '    <p>改完按右下「存檔」或 ⌘S，會寫回 HTML 原檔。文字、位置、大小全部一起存。</p>',
       '    <p>每次存檔前自動備份到 .backups/ 目錄，最多保留 20 份。</p>',
@@ -951,6 +1255,8 @@ EDITOR_JS_TEMPLATE = r"""
       '      <tr><td><span class="__help_kbd">⌘+Enter</span></td><td>對話框內，送出 prompt 加入佇列</td></tr>',
       '      <tr><td><span class="__help_kbd">Alt+↑</span><span class="__help_kbd">Alt+↓</span></td><td>放大／縮小目前選取的文字 2px</td></tr>',
       '      <tr><td><span class="__help_kbd">雙擊</span></td><td>移動模式下，將該元件還原到原位</td></tr>',
+      '      <tr><td><span class="__help_kbd">Backspace</span><span class="__help_kbd">Delete</span></td><td>刪除目前選取的圖片</td></tr>',
+      '      <tr><td>拖檔到 slide</td><td>上傳並插入圖片到拖放位置</td></tr>',
       '      <tr><td><span class="__help_kbd">Esc</span></td><td>關閉對話框 ／ 退出標記模式 ／ 退出移動模式</td></tr>',
       '      <tr><td><span class="__help_kbd">?</span></td><td>開啟這份說明</td></tr>',
       '    </table>',
@@ -983,6 +1289,143 @@ EDITOR_JS_TEMPLATE = r"""
 })();
 </script>
 """
+
+
+# ────────────────────────────────────────────────────────────────────
+# IMAGE UPLOADS
+# Drag-drop and button uploads land here.  Images are written to
+# <docroot>/images/<timestamp>-<safe-name>.<ext> and referenced by
+# the editor JS via the relative path returned to the client.
+# ────────────────────────────────────────────────────────────────────
+
+ALLOWED_IMAGE_EXTS = {"jpg", "jpeg", "png", "webp", "gif", "svg"}
+ALLOWED_IMAGE_MIMES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
+SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def parse_multipart_upload(handler):
+    """Minimal multipart/form-data parser. Returns list of parts:
+    [{name, filename, content_type, data}, ...]. No external deps."""
+    content_type = handler.headers.get("Content-Type", "")
+    m = re.search(r'boundary=(?:"([^"]+)"|([^;]+))', content_type)
+    if not m:
+        return []
+    boundary = (m.group(1) or m.group(2)).strip()
+
+    length = int(handler.headers.get("Content-Length", 0))
+    if length <= 0:
+        return []
+    body = handler.rfile.read(length)
+
+    delim = b"--" + boundary.encode("utf-8", errors="replace")
+    raw_parts = body.split(delim)
+
+    parts = []
+    for raw in raw_parts:
+        raw = raw.lstrip(b"\r\n")
+        if not raw or raw.startswith(b"--"):
+            continue
+        sep = raw.find(b"\r\n\r\n")
+        if sep < 0:
+            continue
+        headers_raw = raw[:sep].decode("utf-8", errors="replace")
+        data = raw[sep + 4:]
+        if data.endswith(b"\r\n"):
+            data = data[:-2]
+
+        name = ""
+        filename = None
+        ctype = "application/octet-stream"
+        for line in headers_raw.split("\r\n"):
+            ll = line.lower()
+            if ll.startswith("content-disposition:"):
+                cd = line.split(":", 1)[1]
+                for piece in cd.split(";"):
+                    piece = piece.strip()
+                    if piece.startswith("name="):
+                        name = piece[5:].strip().strip('"')
+                    elif piece.startswith("filename="):
+                        filename = piece[9:].strip().strip('"')
+            elif ll.startswith("content-type:"):
+                ctype = line.split(":", 1)[1].strip()
+
+        parts.append(
+            {
+                "name": name,
+                "filename": filename,
+                "content_type": ctype,
+                "data": data,
+            }
+        )
+    return parts
+
+
+def save_image_upload(parts, docroot):
+    """Find a file part among `parts`, save to <docroot>/images/.
+    Returns (relative_path_or_None, error_or_None)."""
+    file_part = None
+    for p in parts:
+        if p.get("filename"):
+            file_part = p
+            break
+    if not file_part:
+        return None, "no file in upload"
+
+    data = file_part["data"] or b""
+    if len(data) == 0:
+        return None, "empty file"
+    if len(data) > MAX_IMAGE_SIZE:
+        return None, "file too large (max %dMB)" % (MAX_IMAGE_SIZE // (1024 * 1024))
+
+    filename = file_part["filename"] or "image"
+    ext = ""
+    if "." in filename:
+        ext = filename.rsplit(".", 1)[-1].lower()
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return None, "extension not allowed: %s (allowed: %s)" % (
+            ext or "(none)",
+            ", ".join(sorted(ALLOWED_IMAGE_EXTS)),
+        )
+
+    ctype = (file_part.get("content_type") or "").split(";")[0].strip().lower()
+    if ctype and ctype not in ALLOWED_IMAGE_MIMES:
+        return None, "content-type not allowed: %s" % ctype
+
+    base = os.path.basename(filename)
+    base = SAFE_NAME_RE.sub("_", base)
+    if not base or base.startswith("."):
+        base = "image." + ext
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+    final = "%s-%s" % (ts, base)
+
+    images_dir = os.path.join(docroot, "images")
+    try:
+        os.makedirs(images_dir, exist_ok=True)
+    except OSError as e:
+        return None, "make images dir: %s" % e
+
+    final_path = os.path.join(images_dir, final)
+    # Defensive: ensure resolved path stays inside images_dir
+    real_images = os.path.realpath(images_dir)
+    real_final = os.path.realpath(final_path)
+    if not real_final.startswith(real_images + os.sep):
+        return None, "path traversal blocked"
+
+    try:
+        with open(final_path, "wb") as f:
+            f.write(data)
+    except OSError as e:
+        return None, "write file: %s" % e
+
+    return "images/" + final, None
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -1205,6 +1648,15 @@ def make_handler(config):
             super().do_GET()
 
         def do_POST(self):
+            if self.path == "/upload-image":
+                parts = parse_multipart_upload(self)
+                src, err = save_image_upload(parts, config.docroot)
+                if err:
+                    self._send_json(400, {"ok": False, "error": err})
+                    return
+                self._send_json(200, {"ok": True, "src": src})
+                return
+
             if self.path == "/queue-prompt":
                 try:
                     payload = self._read_json()

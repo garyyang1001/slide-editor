@@ -25,3 +25,6 @@ Thumbs.db
 
 # Server logs
 *.log
+
+# User-uploaded images (per deck, don't track)
+examples/images/

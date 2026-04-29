@@ -40,6 +40,8 @@ python3 editor.py path/to/deck.html
 | **改字級** | 點任何文字 → 上方浮出小工具列：`−` 縮小 / 目前大小 / `+` 放大 / `RESET` 還原。或鍵盤 `Alt+↑` / `Alt+↓`。 |
 | **AI 改寫（即時）** | 標記某段文字 → 輸入指令（「改更口語」「縮成兩句」）→ 10–18 秒後跳出「改前 ／ 改後」對照 → 接受或丟棄。 |
 | **AI 改寫（佇列）** | 同樣標記但選「加入佇列」→ 累積一批 prompt → 回 Claude Code 對話框說「跑 queue」一次處理。 |
+| **插入圖片** | 把圖片檔拖進瀏覽器 → 自動上傳到 deck 旁的 `images/` → 落在拖放位置。也可從工具列「新增圖片」用檔案選擇器。 |
+| **縮放圖片** | 點圖片 → 四個角出現方塊 handle → 拖角縮放（鎖定長寬比）。`Backspace` 刪除選中的圖片。 |
 | **存檔** | `⌘S` 寫回原始 HTML。每次存檔前自動備份到 `.backups/`，保留 20 份。 |
 
 編輯器 JS 是 server 注入的，原始 HTML 檔在你按存檔之前**完全不會被動到**。
@@ -164,6 +166,21 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 待處理的 prompt 會在元素旁顯示紅色小方塊計數，可以隨時點開看／刪。
 
+### 五　插入與縮放圖片
+
+兩種上傳方式：
+
+- **拖檔**　把圖片從 Finder 拖進瀏覽器，落在哪張 slide 圖就放哪裡（拖過 slide 時會出現紅色虛線提示）。
+- **按鈕**　工具列「**新增圖片**」→ 檔案選擇器 → 落在當前可見 slide 的中央。
+
+圖片會儲存到 deck 旁的 `images/` 資料夾，HTML 用相對路徑引用（`<img src="images/..." />`）。檔名加時間戳避免衝突。**支援格式**：jpg / png / webp / gif / svg，**單檔上限** 10 MB。
+
+插入後：
+
+- **移動**　開移動模式拖曳，跟其他元件一樣（`transform: translate` 加在 inline style）。
+- **縮放**　點圖片 → 四個角出現方塊 handle → 拖角縮放，鎖定長寬比。
+- **刪除**　選中圖片按 `Backspace` 或 `Delete`。
+
 ### 存檔
 
 `⌘S` 或工具列「**存檔**」。Server 找到對應 slide 的區塊（用你的 `--slide-key`），把 inner HTML 換掉、寫回檔案。沒動過的 slide 不會被重寫。
@@ -180,6 +197,8 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 | `⌘+Enter` | 對話框內，送出 prompt 加入佇列 |
 | `Alt+↑` / `Alt+↓` | 放大／縮小目前選取的文字 2px |
 | `雙擊` | 移動模式下，將該元件還原到原位 |
+| `Backspace` / `Delete` | 刪除目前選取的圖片 |
+| 拖檔到 slide | 上傳並插入圖片到拖放位置 |
 | `Esc` | 關閉對話框 ／ 退出標記模式 ／ 退出移動模式 |
 | `?` | 開啟使用說明 overlay |
 
