@@ -3,7 +3,9 @@ import { loadFont } from "@remotion/google-fonts/NotoSansTC";
 import { Title } from "./scenes/Title";
 import { Pitch } from "./scenes/Pitch";
 import { Flow } from "./scenes/Flow";
-import { Features } from "./scenes/Features";
+import { DemoEdit } from "./scenes/DemoEdit";
+import { DemoImage } from "./scenes/DemoImage";
+import { DemoAi } from "./scenes/DemoAi";
 import { Closing } from "./scenes/Closing";
 import { bg } from "./tokens";
 
@@ -13,7 +15,6 @@ const { fontFamily } = loadFont("normal", {
   ignoreTooManyRequestsWarning: true,
 });
 
-// Fallback chain: Noto Sans TC for CJK, system sans-serif for Latin.
 const fontStack = `${fontFamily}, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Inter", Arial, sans-serif`;
 
 export const Intro = () => (
@@ -25,24 +26,32 @@ export const Intro = () => (
       color: "#2D2A26",
     }}
   >
-    {/* 0–3s · Title */}
+    {/* 0–3s · Title (90 frames) */}
     <Sequence from={0} durationInFrames={90}>
       <Title />
     </Sequence>
-    {/* 3–8s · Pitch */}
-    <Sequence from={90} durationInFrames={150}>
+    {/* 3–7s · Pitch (120 frames) */}
+    <Sequence from={90} durationInFrames={120}>
       <Pitch />
     </Sequence>
-    {/* 8–12s · Flow */}
-    <Sequence from={240} durationInFrames={120}>
+    {/* 7–10s · Flow (90 frames) */}
+    <Sequence from={210} durationInFrames={90}>
       <Flow />
     </Sequence>
-    {/* 12–20s · Features */}
-    <Sequence from={360} durationInFrames={240}>
-      <Features />
+    {/* 10–18s · Demo 1: click to edit text (240 frames) */}
+    <Sequence from={300} durationInFrames={240}>
+      <DemoEdit />
     </Sequence>
-    {/* 20–25s · Closing */}
-    <Sequence from={600} durationInFrames={150}>
+    {/* 18–26s · Demo 2: image upload + resize (240 frames) */}
+    <Sequence from={540} durationInFrames={240}>
+      <DemoImage />
+    </Sequence>
+    {/* 26–36s · Demo 3: AI rewrite with diff (300 frames) */}
+    <Sequence from={780} durationInFrames={300}>
+      <DemoAi />
+    </Sequence>
+    {/* 36–40s · Closing (120 frames) */}
+    <Sequence from={1080} durationInFrames={120}>
       <Closing />
     </Sequence>
   </AbsoluteFill>
