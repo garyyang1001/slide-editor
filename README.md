@@ -61,7 +61,8 @@ python3 -m slide_editor [DECK]
 | **粗 / 斜 / 底** | 字體工具列 `B` / `I` / `U`，或鍵盤 `⌘B` / `⌘I` / `⌘U`。 |
 | **改字體** | 13 款 Google Fonts：Noto Sans/Serif TC、Inter、Plus Jakarta、IBM Plex、Manrope、Crimson Pro、Lora、JetBrains Mono…，動態載入。 |
 | **改字重 / 字級** | 字體工具列下拉 300/400/500/700 + 加減按鈕（或 `Alt+↑` / `Alt+↓`）。 |
-| **移動元件** | 移動模式 → 拖元件 → 位置存成 `transform: translate(x,y)`。雙擊還原。 |
+| **移動元件** | 移動模式 → 拖元件，或選中後用方向鍵微調。位置存成 `transform: translate(x,y)`。雙擊還原。 |
+| **結構面板** | 工具列「結構」查看目前 slide 的 DOM 樹，點一列即可選中對應元素。 |
 | **插入圖片** | 拖檔進瀏覽器 → 落在拖放點。或工具列「新增圖片」→ 自動放當前 slide 中央。 |
 | **縮放圖片** | 點圖片 → 四角 handle → 拖角縮放，鎖定長寬比。 |
 | **AI 改寫（即時）** | 標記某段 → 輸入指令 → 10–18 秒後跳「改前 / 改後」對照 → 接受或丟棄。 |
@@ -70,6 +71,7 @@ python3 -m slide_editor [DECK]
 | **拖移工具列** | 工具列頂端「編輯器 ／ ⋯」可拖到任何位置，記憶在 localStorage，雙擊還原。 |
 | **返回首頁** | 工具列「← 首頁」回啟動頁換別份簡報。未存會三選一守門：先存再返回 / 丟棄返回 / 取消。 |
 | **存檔** | `⌘S` 寫回原始 HTML。每次存前自動備份到 `.backups/`，保留 20 份。 |
+| **匯出 PDF** | 工具列「匯出 PDF」會先存檔，再用本機 Chrome 產生一份每頁一張 slide 的 PDF。 |
 
 編輯器 JS 是 server 注入的，原始 HTML 檔在你按存檔之前**完全不會被動到**。
 
@@ -196,9 +198,23 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 如果 deck 用 `<deck-stage width="…">` 縮放，編輯器會自己處理 scale 換算 ── 你拖 20px 就是 slide 座標 20px，不會因為視窗大小而跑掉。
 
+點一下元素會用紅框選取；選中後可以用方向鍵微調 1px，按住 `Shift` 變成 10px。這個快捷鍵在 capture 階段處理，避免被 deck 自己的左右鍵翻頁邏輯吃掉。
+
 雙擊任何元件：清掉它的 transform，回到原位。
 
-### 五　插入與縮放圖片
+### 五　查看 slide 結構
+
+工具列「**結構**」會打開目前 slide 的 DOM 樹。每列會顯示 tag、class、id 和一小段文字，點一列即可選中該元素，方便處理「標題跑到 slide-frame 外面」、「巢狀 h2」、「空標題」這類版面問題。
+
+存檔前，編輯器會做一個小型結構整理：
+
+- 把跑出 `.slide-frame` / `.slide-body` 的可見元素移回主要內容區
+- 把 heading 裡面巢狀的 heading 改成 `span`
+- 移除空的 heading
+
+這不是設計重排，只是避免 editable DOM 存出不穩定的 HTML。
+
+### 六　插入與縮放圖片
 
 兩種上傳路徑，看你要不要當下指定位置：
 
@@ -220,7 +236,7 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 - **縮放**　點圖片 → 四個角出現方塊 handle → 拖角縮放，鎖定長寬比。
 - **刪除**　選中圖片按 `Backspace` 或 `Delete`。
 
-### 六　AI 改寫某段
+### 七　AI 改寫某段
 
 點工具列「**標記 prompt**」（會變紅、游標變準心）。在 slide 上點你要改寫的元素 → 跳出對話框：
 
@@ -245,7 +261,7 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 待處理的 prompt 會在元素旁顯示紅色小方塊計數，可以隨時點開看／刪。
 
-### 七　刪除元件
+### 八　刪除元件
 
 **右鍵任何元素** → 跳出紙底選單，紅框框出當前要刪的目標：
 
@@ -257,7 +273,7 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 
 不小心刪錯：去 `.backups/` 找上次的 HTML 還原。
 
-### 八　工具列位置
+### 九　工具列位置
 
 右下角預設位置擋到 slide？拖工具列頂端「**編輯器 ／ ⋯**」那條可以把整個工具列移到任何地方。位置會記在 localStorage，重新整理還在那。
 
@@ -268,6 +284,12 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 `⌘S` 或工具列「**存檔**」。Server 找到對應 slide 的區塊（用你的 `--slide-key`），把 inner HTML 換掉、寫回檔案。沒動過的 slide 不會被重寫。
 
 每次存檔前自動備份到 `.backups/deck-YYYYMMDD-HHMMSS.html`，保留最近 20 份。
+
+### 匯出 PDF
+
+工具列「**匯出 PDF**」會先呼叫存檔，確認沒有未存成功的 slide 後，再向 server 的 `/export-pdf` 要一份 PDF。Server 會用本機 Chrome headless 開啟不含編輯器 overlay 的 deck，套用列印 CSS，讓每個 slide 變成 PDF 的一頁。
+
+匯出需要本機有 Chrome 或 Chromium。macOS 會優先找 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`。
 
 ### 返回首頁
 
@@ -287,6 +309,8 @@ python3 editor.py deck.html --slide-tag div --slide-class slide --slide-key data
 | `⌘B` / `⌘I` / `⌘U` | 粗體 / 斜體 / 底線 |
 | `⌘+Enter` | 對話框內，送出 prompt 加入佇列 |
 | `Alt+↑` / `Alt+↓` | 放大／縮小目前選取的文字 2px |
+| 移動模式下 `↑` / `↓` / `←` / `→` | 微調目前選取元素 1px |
+| 移動模式下 `Shift+↑` / `Shift+↓` / `Shift+←` / `Shift+→` | 微調目前選取元素 10px |
 | `右鍵` | 開啟刪除元素選單 |
 | `雙擊` | 移動模式下還原元件位置　／　工具列頂端還原工具列位置 |
 | `Backspace` / `Delete` | 刪除目前選取的圖片 |
@@ -316,13 +340,14 @@ slide-editor/
 
 Python 程式碼總共約 1000 行，以前是單檔 3000+ 行。JS / HTML 拆出去獨立檔案，IDE 才有正確的 syntax highlighting。
 
-伺服器做五件事：
+伺服器做六件事：
 
 1. **服務 deck 檔**　收到 GET 請求時把 `overlay/editor.js` 注入到 `</body>` 前面才回傳。原始檔不動。
 2. **存 slide 級的編輯**　`POST /save-slide`：讀原檔、regex 找對應 slide、換 inner HTML、寫回。寫之前自動備份到 `.backups/`。
 3. **管 prompt + 跑 AI**　`/queue-prompt`、`/delete-prompt`、`/clear-prompts`、`/list-prompts` 操作 `prompts.json`。`/ai-edit` shells out 到 `claude` 或 `codex` CLI 做即時改寫，依 `--backend` 旗標選擇。
 4. **處理圖片上傳**　`POST /upload-image` 自帶 multipart 解析器（不依賴已被 deprecate 的 `cgi` module），驗證副檔名、MIME、大小、檔名 sanitize、`realpath` 防穿越，存到 `<docroot>/images/`。
-5. **Launcher 模式**　不傳 deck arg 時，server 啟動成 launcher。`POST /launch/zip` 解壓到 `~/.slide-editor/projects/`、`POST /launch/path` 驗證路徑、`POST /launch/reset` 切回 launcher 模式。`~/.slide-editor/recent.json` 記最近 20 筆，`POST /api/recent/delete` 可單筆刪除。
+5. **匯出 PDF**　`GET /export-pdf` 用本機 Chrome headless 開啟純 deck 頁面，移除編輯器 overlay 和 stage runtime，透過 Chrome DevTools Protocol 的 `Page.printToPDF` 產生橫式 PDF。
+6. **Launcher 模式**　不傳 deck arg 時，server 啟動成 launcher。`POST /launch/zip` 解壓到 `~/.slide-editor/projects/`、`POST /launch/path` 驗證路徑、`POST /launch/reset` 切回 launcher 模式。`~/.slide-editor/recent.json` 記最近 20 筆，`POST /api/recent/delete` 可單筆刪除。
 
 沒有 build step、沒有 npm、沒有外部 Python 套件。`python3 main.py` 一行就跑。
 

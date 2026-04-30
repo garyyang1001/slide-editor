@@ -1,13 +1,19 @@
 """HTTP server, request handler, CLI argparse, boot."""
 import argparse
+import base64
 import http.server
 import json
 import os
 import re
 import shutil
+import socket
+import subprocess
 import sys
 import threading
+import tempfile
+import time
 import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -69,6 +75,187 @@ def make_backup(deck_path, backup_dir, keep=20):
     return dest
 
 
+def find_chrome():
+    candidates = [
+        shutil.which("google-chrome"),
+        shutil.which("chromium"),
+        shutil.which("chrome"),
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+class CdpWebSocket:
+    def __init__(self, ws_url):
+        parsed = urllib.parse.urlparse(ws_url)
+        self.host = parsed.hostname
+        self.port = parsed.port
+        self.path = parsed.path + (("?" + parsed.query) if parsed.query else "")
+        self.sock = socket.create_connection((self.host, self.port), timeout=10)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        request = (
+            "GET %s HTTP/1.1\r\n"
+            "Host: %s:%d\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: %s\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        ) % (self.path, self.host, self.port, key)
+        self.sock.sendall(request.encode("ascii"))
+        response = self.sock.recv(4096)
+        if b" 101 " not in response.split(b"\r\n", 1)[0]:
+            raise RuntimeError("CDP websocket handshake failed")
+        self._id = 0
+
+    def close(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+    def _send_text(self, text):
+        payload = text.encode("utf-8")
+        header = bytearray([0x81])
+        length = len(payload)
+        if length < 126:
+            header.append(0x80 | length)
+        elif length < 65536:
+            header.append(0x80 | 126)
+            header.extend(length.to_bytes(2, "big"))
+        else:
+            header.append(0x80 | 127)
+            header.extend(length.to_bytes(8, "big"))
+        mask = os.urandom(4)
+        header.extend(mask)
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        self.sock.sendall(bytes(header) + masked)
+
+    def _recv_text(self):
+        chunks = []
+        while True:
+            first = self.sock.recv(2)
+            if len(first) < 2:
+                raise RuntimeError("CDP websocket closed")
+            opcode = first[0] & 0x0F
+            length = first[1] & 0x7F
+            if length == 126:
+                length = int.from_bytes(self.sock.recv(2), "big")
+            elif length == 127:
+                length = int.from_bytes(self.sock.recv(8), "big")
+            masked = first[1] & 0x80
+            mask = self.sock.recv(4) if masked else b""
+            payload = b""
+            while len(payload) < length:
+                payload += self.sock.recv(length - len(payload))
+            if masked:
+                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+            if opcode == 0x8:
+                raise RuntimeError("CDP websocket closed")
+            if opcode == 0x9:
+                continue
+            if opcode in (0x1, 0x0):
+                chunks.append(payload)
+                if first[0] & 0x80:
+                    return b"".join(chunks).decode("utf-8")
+
+    def call(self, method, params=None, timeout=30):
+        self._id += 1
+        msg_id = self._id
+        self._send_text(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
+        old_timeout = self.sock.gettimeout()
+        self.sock.settimeout(timeout)
+        try:
+            while True:
+                msg = json.loads(self._recv_text())
+                if msg.get("id") != msg_id:
+                    continue
+                if "error" in msg:
+                    raise RuntimeError("%s failed: %s" % (method, msg["error"]))
+                return msg.get("result", {})
+        finally:
+            self.sock.settimeout(old_timeout)
+
+
+def chrome_print_pdf(chrome, url, pdf_path):
+    user_data_dir = tempfile.mkdtemp(prefix="slide-editor-chrome-")
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            [
+                chrome,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--remote-debugging-port=0",
+                "--user-data-dir=" + user_data_dir,
+                "--hide-scrollbars",
+                url,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        port_file = os.path.join(user_data_dir, "DevToolsActivePort")
+        deadline = time.time() + 20
+        while time.time() < deadline and not os.path.exists(port_file):
+            if proc.poll() is not None:
+                _, stderr = proc.communicate(timeout=1)
+                raise RuntimeError(stderr.decode("utf-8", errors="replace")[-1200:])
+            time.sleep(0.05)
+        if not os.path.exists(port_file):
+            raise RuntimeError("Chrome DevTools port did not open")
+        with open(port_file, "r", encoding="utf-8") as f:
+            port = int(f.readline().strip())
+        deadline = time.time() + 20
+        target = None
+        while time.time() < deadline:
+            with urllib.request.urlopen("http://127.0.0.1:%d/json/list" % port, timeout=2) as r:
+                targets = json.loads(r.read().decode("utf-8"))
+            target = next((t for t in targets if t.get("type") == "page" and t.get("webSocketDebuggerUrl")), None)
+            if target:
+                break
+            time.sleep(0.1)
+        if not target:
+            raise RuntimeError("Chrome page target not found")
+        ws = CdpWebSocket(target["webSocketDebuggerUrl"])
+        try:
+            ws.call("Page.enable")
+            ws.call("Emulation.setEmulatedMedia", {"media": "print"})
+            ws.call("Runtime.evaluate", {
+                "expression": "document.fonts ? document.fonts.ready.then(() => true) : true",
+                "awaitPromise": True,
+            }, timeout=20)
+            time.sleep(0.5)
+            result = ws.call("Page.printToPDF", {
+                "printBackground": True,
+                "preferCSSPageSize": True,
+                "landscape": True,
+                "paperWidth": 20,
+                "paperHeight": 11.25,
+                "marginTop": 0,
+                "marginRight": 0,
+                "marginBottom": 0,
+                "marginLeft": 0,
+                "scale": 1,
+            }, timeout=60)
+        finally:
+            ws.close()
+        data = base64.b64decode(result["data"])
+        with open(pdf_path, "wb") as f:
+            f.write(data)
+    finally:
+        if proc:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        shutil.rmtree(user_data_dir, ignore_errors=True)
+
+
 # ────────────────────────────────────────────────────────────────────
 # Config + Handler
 # ────────────────────────────────────────────────────────────────────
@@ -101,7 +288,9 @@ def make_handler(config):
             return json.loads(self.rfile.read(length).decode("utf-8"))
 
         def do_GET(self):
-            path = urllib.parse.urlparse(self.path).path
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            query = urllib.parse.parse_qs(parsed.query)
 
             # Launcher mode: any GET returns the cover page (or recents JSON)
             if config.mode == "launcher":
@@ -126,6 +315,52 @@ def make_handler(config):
                     data = load_prompts(config.prompts_file)
                 self._send_json(200, data)
                 return
+            if path == "/export-pdf":
+                chrome = find_chrome()
+                if not chrome:
+                    self._send_json(
+                        500,
+                        {"ok": False, "error": "Chrome/Chromium not found for PDF export"},
+                    )
+                    return
+                host = self.headers.get("Host") or ("%s:%d" % (config.host, config.port))
+                deck_url = (
+                    "http://%s/%s?__export_pdf=1"
+                    % (host, urllib.parse.quote(config.deck_file))
+                )
+                base = os.path.splitext(os.path.basename(config.deck_file))[0]
+                safe_base = re.sub(r"[^\w\u4e00-\u9fff.-]+", "-", base).strip("-") or "deck"
+                fd, pdf_path = tempfile.mkstemp(prefix=safe_base + "-", suffix=".pdf")
+                os.close(fd)
+                try:
+                    chrome_print_pdf(chrome, deck_url, pdf_path)
+                    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                        self._send_json(
+                            500,
+                            {"ok": False, "error": "PDF export failed"},
+                        )
+                        return
+                    with open(pdf_path, "rb") as f:
+                        body = f.read()
+                    filename = safe_base + ".pdf"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/pdf")
+                    self.send_header(
+                        "Content-Disposition",
+                        "attachment; filename*=UTF-8''%s" % urllib.parse.quote(filename),
+                    )
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                except Exception as e:
+                    self._send_json(500, {"ok": False, "error": str(e)})
+                    return
+                finally:
+                    try:
+                        os.remove(pdf_path)
+                    except OSError:
+                        pass
             if path == "/api/recent":
                 self._send_json(200, {"projects": load_recent()})
                 return
@@ -145,15 +380,68 @@ def make_handler(config):
                 except OSError as e:
                     self.send_error(500, str(e))
                     return
-                editor_js = (
-                    EDITOR_JS_TEMPLATE
-                    .replace("__SLIDE_SELECTOR__", config.slide_selector)
-                    .replace("__SLIDE_KEY__", config.slide_key)
-                )
-                if b"</body>" in body:
-                    body = body.replace(b"</body>", editor_js.encode("utf-8") + b"</body>", 1)
+                if "__export_pdf" not in query:
+                    editor_js = (
+                        EDITOR_JS_TEMPLATE
+                        .replace("__SLIDE_SELECTOR__", config.slide_selector)
+                        .replace("__SLIDE_KEY__", config.slide_key)
+                    )
+                    if b"</body>" in body:
+                        body = body.replace(b"</body>", editor_js.encode("utf-8") + b"</body>", 1)
+                    else:
+                        body = body + editor_js.encode("utf-8")
                 else:
-                    body = body + editor_js.encode("utf-8")
+                    export_css = """
+<style id="slide-editor-export-pdf">
+  @page { size: 1920px 1080px; margin: 0; }
+  @media print {
+    html, body {
+      width: 1920px !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #fff !important;
+      overflow: visible !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    deck-stage {
+      display: block !important;
+      position: static !important;
+      width: 1920px !important;
+      height: auto !important;
+      background: #fff !important;
+      overflow: visible !important;
+    }
+    deck-stage > section.slide {
+      display: block !important;
+      position: relative !important;
+      inset: auto !important;
+      width: 1920px !important;
+      height: 1080px !important;
+      box-sizing: border-box !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      overflow: hidden !important;
+      break-after: page;
+      page-break-after: always;
+    }
+    deck-stage > section.slide:last-of-type {
+      break-after: auto;
+      page-break-after: auto;
+    }
+  }
+</style>
+"""
+                    body = re.sub(
+                        br'<script\s+src=["\']deck-stage\.js["\']\s*>\s*</script>',
+                        b"",
+                        body,
+                        flags=re.IGNORECASE,
+                    )
+                    if b"</head>" in body:
+                        body = body.replace(b"</head>", export_css.encode("utf-8") + b"</head>", 1)
+                    else:
+                        body = export_css.encode("utf-8") + body
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -463,6 +751,8 @@ def main():
     config.slide_selector = "%s.%s" % (args.slide_tag, args.slide_class)
     config.ai_enabled = not args.no_ai
     config.backend = args.backend
+    config.host = args.host
+    config.port = args.port
     config.write_lock = threading.Lock()
     config.prompts_lock = threading.Lock()
 

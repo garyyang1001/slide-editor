@@ -122,6 +122,7 @@
       '#__save_status__{margin-left:auto;font-size:11px;letter-spacing:0.05em;color:var(--ed-gray);min-width:90px;text-align:right;font-weight:400}',
       '#__save_status__.__dirty{color:var(--ed-red)}',
       '#__save_status__.__ok{color:var(--ed-ink)}',
+      '.__ed_selected{outline:2px solid var(--ed-red) !important;outline-offset:4px;background:rgba(200,70,48,0.05) !important}',
 
       '.__prompt_dot{position:absolute;z-index:99999;background:var(--ed-red);color:var(--ed-bg);font-family:var(--ed-font);font-size:11px;font-weight:500;letter-spacing:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;transform:translate(-50%,-50%);transition:opacity 280ms var(--ed-ease)}',
       '.__prompt_dot:hover{opacity:0.85}',
@@ -187,6 +188,18 @@
       '#__move_indicator__{position:fixed;bottom:140px;right:24px;z-index:2147483645;background:var(--ed-ink);color:var(--ed-bg);padding:8px 12px;font-family:var(--ed-mono);font-size:11px;letter-spacing:0.05em;display:none;line-height:1.4}',
       '#__move_indicator__.show{display:block}',
 
+      '#__tree_panel__{position:fixed;top:24px;left:24px;z-index:2147483644;width:340px;max-height:78vh;background:var(--ed-bg-warm);border:1px solid var(--ed-ink);font-family:var(--ed-font);color:var(--ed-ink);display:none;box-sizing:border-box}',
+      '#__tree_panel__.show{display:block}',
+      '.__tree_head{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--ed-line);font-size:11px;letter-spacing:0.1em;text-transform:uppercase}',
+      '.__tree_head b{font-size:12px;font-weight:500;letter-spacing:0.08em}',
+      '.__tree_head button{margin-left:auto;border:1px solid var(--ed-line);background:transparent;color:var(--ed-gray);width:24px;height:24px;cursor:pointer;font-family:inherit}',
+      '.__tree_body{padding:10px 0;overflow:auto;max-height:calc(78vh - 50px)}',
+      '.__tree_row{display:block;width:100%;border:0;background:transparent;text-align:left;padding:7px 12px;font-family:var(--ed-mono);font-size:11px;line-height:1.35;color:var(--ed-ink);cursor:pointer;border-bottom:1px solid rgba(224,224,216,0.55)}',
+      '.__tree_row:hover{background:var(--ed-bg-soft)}',
+      '.__tree_row.__active{background:var(--ed-ink);color:var(--ed-bg)}',
+      '.__tree_row .__tree_text{font-family:var(--ed-font);font-size:11px;color:var(--ed-gray);letter-spacing:0;margin-left:6px}',
+      '.__tree_row.__active .__tree_text{color:rgba(245,245,240,0.75)}',
+
       '#__font_toolbar__{position:absolute;z-index:2147483640;background:var(--ed-bg-warm);border:1px solid var(--ed-ink);padding:0;display:none;align-items:center;gap:0;font-family:var(--ed-font);font-weight:300;line-height:1}',
       '#__font_toolbar__.show{display:flex}',
       '.__ft_btn{background:transparent;border:0;padding:8px 14px;font-family:inherit;font-weight:300;color:var(--ed-ink);cursor:pointer;line-height:1;border-right:1px solid var(--ed-line);transition:opacity 280ms var(--ed-ease)}',
@@ -248,10 +261,12 @@
       '<div class="__bar_bottom">',
       '  <button class="__btn __btn-ghost" id="__pin_btn__" title="標記要 AI 改寫的位置">標記 prompt</button>',
       '  <button class="__btn __btn-ghost" id="__move_btn__" title="拖曳元件改變位置">移動模式</button>',
+      '  <button class="__btn __btn-ghost" id="__tree_btn__" title="查看目前頁面的 HTML 結構">結構</button>',
       '  <button class="__btn __btn-ghost" id="__img_btn__" title="上傳圖片（也可拖檔到 slide）">新增圖片</button>',
       '  <button class="__btn __btn-ghost" id="__add_h2_btn__" title="新增標題（H2）">＋ 標題</button>',
       '  <button class="__btn __btn-ghost" id="__add_p_btn__" title="新增一般文字（P）">＋ 文字</button>',
       '  <button class="__btn __btn-ghost" id="__queue_btn__" title="查看 prompt 佇列">佇列 ／ <span id="__queue_count__">0</span></button>',
+      '  <button class="__btn __btn-ghost" id="__export_pdf_btn__" title="先存檔，再匯出目前簡報 PDF">匯出 PDF</button>',
       '  <button class="__btn __btn-ink" id="__save_btn__" title="儲存到檔案（⌘S）">存檔</button>',
       '  <span id="__save_status__">就緒</span>',
       '</div>'
@@ -263,6 +278,8 @@
     var queueBtn = document.getElementById('__queue_btn__');
     var queueCount = document.getElementById('__queue_count__');
     var helpBtn = document.getElementById('__help_btn__');
+    var treeBtn = document.getElementById('__tree_btn__');
+    var exportPdfBtn = document.getElementById('__export_pdf_btn__');
     var status = document.getElementById('__save_status__');
 
     function setStatus(text, level) {
@@ -380,6 +397,44 @@
       }
     }, true);
 
+    var HEADING_TAGS = new Set(['H1','H2','H3','H4','H5','H6']);
+    function preferredSlideBody(slide) {
+      return slide.querySelector('.slide-body') ||
+             slide.querySelector('.slide-frame') ||
+             slide;
+    }
+
+    function normalizeSlideStructure(slide) {
+      var changed = false;
+      var body = preferredSlideBody(slide);
+
+      // Move visible elements that escaped slide-frame/slide-body back into the main body.
+      Array.from(slide.children).forEach(function (child) {
+        if (child.matches('.slide-frame,.section-divider,style,script')) return;
+        if (!child.textContent.trim() && child.children.length === 0 && child.tagName !== 'IMG') return;
+        if (body && child !== body && !body.contains(child)) {
+          body.appendChild(child);
+          changed = true;
+        }
+      });
+
+      // Prevent headings inside headings, which creates unstable editable DOM.
+      slide.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(function (heading) {
+        Array.from(heading.querySelectorAll('h1,h2,h3,h4,h5,h6')).forEach(function (nested) {
+          var span = document.createElement('span');
+          span.innerHTML = nested.innerHTML;
+          nested.replaceWith(span);
+          changed = true;
+        });
+        if (!heading.textContent.replace(/\s/g, '').length && heading.children.length === 0) {
+          heading.remove();
+          changed = true;
+        }
+      });
+
+      return changed;
+    }
+
     async function saveAll() {
       if (dirty.size === 0) {
         setStatus('沒有變動', '');
@@ -394,6 +449,7 @@
         var slide = document.querySelector(SLIDE_SELECTOR + '[' + SLIDE_KEY + '="' + CSS.escape(label) + '"]');
         if (!slide) { failed.push(label); continue; }
         try {
+          normalizeSlideStructure(slide);
           var r = await fetch('/save-slide', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -409,6 +465,54 @@
     }
     saveBtn.addEventListener('click', saveAll);
 
+    async function exportPdf() {
+      exportPdfBtn.disabled = true;
+      var oldText = exportPdfBtn.textContent;
+      exportPdfBtn.textContent = '匯出中…';
+      try {
+        await saveAll();
+        if (dirty.size > 0) {
+          alert('仍有未成功儲存的頁面，先修正後再匯出 PDF。');
+          return;
+        }
+        setStatus('正在產生 PDF…', '');
+        var r = await fetch('/export-pdf');
+        if (!r.ok) {
+          var msg = 'PDF 匯出失敗';
+          try {
+            var data = await r.json();
+            msg += '：' + (data.error || r.statusText);
+          } catch (err) {
+            msg += '：' + r.statusText;
+          }
+          alert(msg);
+          setStatus('PDF 匯出失敗', 'dirty');
+          return;
+        }
+        var blob = await r.blob();
+        var disposition = r.headers.get('Content-Disposition') || '';
+        var filename = 'deck.pdf';
+        var m = disposition.match(/filename\*=UTF-8''([^;]+)/);
+        if (m) filename = decodeURIComponent(m[1]);
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        setStatus('PDF 已匯出', 'ok');
+      } catch (err) {
+        alert('PDF 匯出失敗：' + err);
+        setStatus('PDF 匯出失敗', 'dirty');
+      } finally {
+        exportPdfBtn.disabled = false;
+        exportPdfBtn.textContent = oldText;
+      }
+    }
+    exportPdfBtn.addEventListener('click', exportPdf);
+
     function isTyping(el) {
       if (!el) return false;
       if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return true;
@@ -416,19 +520,61 @@
       return false;
     }
 
+    function markDirty(slide) {
+      var key = getSlideKey(slide);
+      if (!key) return;
+      dirty.add(key);
+      setStatus(dirty.size + ' 張未存', 'dirty');
+    }
+
+    function consumeShortcut(e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+
     window.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); saveAll(); }
-      if (e.key === 'Escape') {
-        if (document.body.classList.contains('__pin_mode__')) exitPinMode();
-        if (document.body.classList.contains('__move_mode__')) exitMoveMode();
-        if (document.body.classList.contains('__insert_mode__')) exitInsertMode();
-        var hm = document.getElementById('__help_modal__');
-        if (hm && hm.classList.contains('show')) closeHelp();
-        var homeM = document.getElementById('__home_modal__');
-        if (homeM && homeM.classList.contains('show')) homeM.classList.remove('show');
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        consumeShortcut(e);
+        saveAll();
+        return;
       }
-      if (e.key === '?' && !isTyping(e.target)) { e.preventDefault(); openHelp(); }
-    });
+      if (e.key === 'Escape') {
+        var handled = false;
+        if (document.body.classList.contains('__pin_mode__')) { exitPinMode(); handled = true; }
+        if (document.body.classList.contains('__move_mode__')) { exitMoveMode(); handled = true; }
+        if (document.body.classList.contains('__insert_mode__')) { exitInsertMode(); handled = true; }
+        var hm = document.getElementById('__help_modal__');
+        if (hm && hm.classList.contains('show')) { closeHelp(); handled = true; }
+        var homeM = document.getElementById('__home_modal__');
+        if (homeM && homeM.classList.contains('show')) { homeM.classList.remove('show'); handled = true; }
+        var ctx = document.getElementById('__context_menu__');
+        if (ctx && ctx.classList.contains('show')) { hideContextMenu(); handled = true; }
+        if (handled) consumeShortcut(e);
+        return;
+      }
+      if (e.key === '?' && !isTyping(e.target)) {
+        consumeShortcut(e);
+        openHelp();
+        return;
+      }
+      if (document.body.classList.contains('__move_mode__') &&
+          selectedElement &&
+          ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].indexOf(e.key) !== -1 &&
+          !isTyping(e.target)) {
+        consumeShortcut(e);
+        var step = e.shiftKey ? 10 : 1;
+        var pos = parseTranslate(selectedElement);
+        if (e.key === 'ArrowLeft') pos.x -= step;
+        if (e.key === 'ArrowRight') pos.x += step;
+        if (e.key === 'ArrowUp') pos.y -= step;
+        if (e.key === 'ArrowDown') pos.y += step;
+        setTranslate(selectedElement, pos.x, pos.y);
+        var slide = findSlide(selectedElement);
+        if (slide) markDirty(slide);
+        moveIndicator.classList.add('show');
+        moveIndicator.textContent = '已微調到 ' + Math.round(pos.x) + ', ' + Math.round(pos.y) + ' px　·　Shift=10px';
+      }
+    }, true);
 
     window.addEventListener('beforeunload', function (e) {
       if (dirty.size > 0) { e.preventDefault(); e.returnValue = ''; }
@@ -695,6 +841,14 @@
     var moveIndicator = document.createElement('div');
     moveIndicator.id = '__move_indicator__';
     document.body.appendChild(moveIndicator);
+    var selectedElement = null;
+
+    function selectElement(el) {
+      if (selectedElement) selectedElement.classList.remove('__ed_selected');
+      selectedElement = el || null;
+      if (selectedElement) selectedElement.classList.add('__ed_selected');
+      renderTree();
+    }
 
     function enterMoveMode() {
       if (document.body.classList.contains('__pin_mode__')) exitPinMode();
@@ -707,7 +861,7 @@
         el.contentEditable = 'false';
       });
       moveIndicator.classList.add('show');
-      moveIndicator.textContent = '拖曳任何元件即可移動';
+      moveIndicator.textContent = '拖曳任何元件即可移動　·　方向鍵微調　·　雙擊還原';
     }
     function exitMoveMode() {
       document.body.classList.remove('__move_mode__', '__dragging');
@@ -737,6 +891,84 @@
       return rect.width / nativeW;
     }
 
+    function parseTranslate(el) {
+      var match = (el.style.transform || '').match(/translate\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px\s*\)/);
+      return {
+        x: match ? parseFloat(match[1]) : 0,
+        y: match ? parseFloat(match[2]) : 0
+      };
+    }
+
+    function setTranslate(el, x, y) {
+      el.style.transform = 'translate(' + x.toFixed(1) + 'px, ' + y.toFixed(1) + 'px)';
+    }
+
+    var treePanel = document.createElement('div');
+    treePanel.id = '__tree_panel__';
+    treePanel.innerHTML = [
+      '<div class="__tree_head"><b>目前頁面結構</b><button id="__tree_close__">×</button></div>',
+      '<div class="__tree_body" id="__tree_body__"></div>'
+    ].join('');
+    document.body.appendChild(treePanel);
+    var treeBody = document.getElementById('__tree_body__');
+
+    function treeLabel(el) {
+      var cls = el.className && typeof el.className === 'string'
+        ? '.' + el.className.split(' ').filter(Boolean).filter(function (c) { return c.indexOf('__') !== 0; }).slice(0, 2).join('.')
+        : '';
+      var text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.length > 32) text = text.slice(0, 32) + '…';
+      return '<' + el.tagName.toLowerCase() + cls + '>' + (text ? '<span class="__tree_text">' + escapeHtml(text) + '</span>' : '');
+    }
+
+    function renderTree() {
+      if (!treePanel || !treePanel.classList.contains('show')) return;
+      var slide = getActiveSlide();
+      if (!slide) {
+        treeBody.innerHTML = '<button class="__tree_row">找不到目前頁面</button>';
+        return;
+      }
+      var rows = [];
+      function walk(el, depth) {
+        if (el !== slide && (SKIP_TAGS.has(el.tagName) || el.id && el.id.indexOf('__') === 0)) return;
+        if (el !== slide) {
+          var idx = rows.length;
+          rows.push({ el: el, depth: depth });
+        }
+        Array.from(el.children).forEach(function (child) {
+          if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') return;
+          if (depth > 5) return;
+          walk(child, depth + 1);
+        });
+      }
+      walk(slide, 0);
+      treeBody.innerHTML = rows.map(function (row, i) {
+        var active = row.el === selectedElement ? ' __active' : '';
+        return '<button class="__tree_row' + active + '" data-idx="' + i + '" style="padding-left:' + (12 + row.depth * 14) + 'px">' + treeLabel(row.el) + '</button>';
+      }).join('');
+      treeBody.querySelectorAll('.__tree_row[data-idx]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var row = rows[parseInt(btn.dataset.idx, 10)];
+          if (!row) return;
+          selectElement(row.el);
+          row.el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+        });
+      });
+    }
+
+    function toggleTree() {
+      treePanel.classList.toggle('show');
+      treeBtn.classList.toggle('__btn-red', treePanel.classList.contains('show'));
+      treeBtn.classList.toggle('__btn-ghost', !treePanel.classList.contains('show'));
+      renderTree();
+    }
+    treeBtn.addEventListener('click', toggleTree);
+    document.getElementById('__tree_close__').addEventListener('click', function () {
+      treePanel.classList.remove('show');
+      treeBtn.classList.remove('__btn-red');
+      treeBtn.classList.add('__btn-ghost');
+    });
+
     var dragState = null;
     document.addEventListener('mousedown', function (e) {
       if (!document.body.classList.contains('__move_mode__')) return;
@@ -745,14 +977,13 @@
       if (!slide) return;
       e.preventDefault();
       var el = e.target;
-      var match = (el.style.transform || '').match(/translate\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px\s*\)/);
-      var baseX = match ? parseFloat(match[1]) : 0;
-      var baseY = match ? parseFloat(match[2]) : 0;
+      selectElement(el);
+      var pos = parseTranslate(el);
       var scale = getStageScale(slide) || 1;
       dragState = {
         el: el, slide: slide,
         startX: e.clientX, startY: e.clientY,
-        baseX: baseX, baseY: baseY, scale: scale
+        baseX: pos.x, baseY: pos.y, scale: scale
       };
       document.body.classList.add('__dragging');
       moveIndicator.textContent = 'Δ 0, 0 px';
@@ -763,7 +994,7 @@
       var dy = (e.clientY - dragState.startY) / dragState.scale;
       var newX = dragState.baseX + dx;
       var newY = dragState.baseY + dy;
-      dragState.el.style.transform = 'translate(' + newX.toFixed(1) + 'px, ' + newY.toFixed(1) + 'px)';
+      setTranslate(dragState.el, newX, newY);
       moveIndicator.textContent = 'Δ ' + Math.round(newX) + ', ' + Math.round(newY) + ' px';
     });
     document.addEventListener('mouseup', function () {
@@ -783,6 +1014,7 @@
       var slide = findSlide(e.target);
       if (!slide) return;
       e.preventDefault();
+      selectElement(e.target);
       e.target.style.transform = '';
       var key = getSlideKey(slide);
       if (key) {
@@ -1047,9 +1279,9 @@
 
     window.addEventListener('keydown', function (e) {
       if (!focusedEditable) return;
-      if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); changeFontSize(2); }
-      if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); changeFontSize(-2); }
-    });
+      if (e.altKey && e.key === 'ArrowUp') { consumeShortcut(e); changeFontSize(2); }
+      if (e.altKey && e.key === 'ArrowDown') { consumeShortcut(e); changeFontSize(-2); }
+    }, true);
 
     var fontTbReposition = function () {
       if (focusedEditable && fontToolbar.classList.contains('show')) positionFontToolbar(focusedEditable);
@@ -1239,7 +1471,11 @@
       if (dragHoverSlide) dragHoverSlide.classList.remove('__drop_target__');
       dragHoverSlide = null;
 
-      var rect = slide.getBoundingClientRect();
+      var targetBody = preferredSlideBody(slide);
+      if (targetBody !== slide && getComputedStyle(targetBody).position === 'static') {
+        targetBody.style.position = 'relative';
+      }
+      var rect = targetBody.getBoundingClientRect();
       var scale = getStageScale(slide) || 1;
       var localX = (e.clientX - rect.left) / scale;
       var localY = (e.clientY - rect.top) / scale;
@@ -1351,7 +1587,7 @@
     // Backspace / Delete deletes the selected image
     window.addEventListener('keydown', function (e) {
       if ((e.key === 'Backspace' || e.key === 'Delete') && selectedImage && !isTyping(e.target)) {
-        e.preventDefault();
+        consumeShortcut(e);
         var slide = findSlide(selectedImage);
         var key = slide ? getSlideKey(slide) : '';
         selectedImage.remove();
@@ -1361,7 +1597,7 @@
           setStatus(dirty.size + ' 張未存', 'dirty');
         }
       }
-    });
+    }, true);
 
     // Reposition handles on scroll/resize/edit
     var handleReposition = function () {
@@ -1449,7 +1685,8 @@
         'min-width:120px',
         type === 'p' ? 'max-width:600px' : ''
       ].filter(Boolean).join(';');
-      slide.appendChild(el);
+      targetBody.appendChild(el);
+      selectElement(el);
 
       var key = getSlideKey(slide);
       if (key) {
@@ -1824,11 +2061,16 @@
         focusedEditable = null;
         fontToolbar.classList.remove('show');
       }
+      if (selectedElement && (toRemove === selectedElement || toRemove.contains(selectedElement))) {
+        selectedElement.classList.remove('__ed_selected');
+        selectedElement = null;
+      }
       toRemove.remove();
       if (key) {
         dirty.add(key);
         setStatus(dirty.size + ' 張未存', 'dirty');
       }
+      renderTree();
       hideContextMenu();
     });
 
