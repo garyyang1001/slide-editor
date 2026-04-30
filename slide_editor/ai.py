@@ -46,6 +46,23 @@ def clean_ai_output(text):
     return text
 
 
+def _preview(text, limit=500):
+    text = (text or "").strip()
+    return text[:limit]
+
+
+def _parse_claude_json(stdout):
+    if stdout is None or not str(stdout).strip():
+        return None, "claude returned empty stdout; is Claude CLI logged in in this shell?"
+    try:
+        return json.loads(stdout), None
+    except Exception as e:
+        return None, "claude returned non-JSON output: %s. stdout preview: %s" % (
+            e,
+            _preview(stdout),
+        )
+
+
 def call_claude(prompt, docroot, timeout=120):
     """Call Anthropic Claude Code CLI with --output-format json."""
     try:
@@ -68,16 +85,25 @@ def call_claude(prompt, docroot, timeout=120):
     except subprocess.TimeoutExpired:
         return {"ok": False, "backend": "claude", "error": "claude timed out (%ds)" % timeout}
 
+    data, parse_error = _parse_claude_json(proc.stdout)
     if proc.returncode != 0:
+        if data and data.get("result"):
+            detail = data.get("result")
+        else:
+            detail = parse_error or _preview(proc.stderr)
         return {
             "ok": False,
             "backend": "claude",
-            "error": "claude exited %d: %s" % (proc.returncode, proc.stderr[:500]),
+            "error": "claude exited %d: %s" % (proc.returncode, detail),
         }
-    try:
-        data = json.loads(proc.stdout)
-    except Exception as e:
-        return {"ok": False, "backend": "claude", "error": "parse claude output: %s" % e}
+    if parse_error:
+        return {"ok": False, "backend": "claude", "error": parse_error}
+    if data.get("is_error"):
+        return {
+            "ok": False,
+            "backend": "claude",
+            "error": "claude error: %s" % (data.get("result") or "unknown error"),
+        }
 
     return {
         "ok": True,
